@@ -7,6 +7,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RedisModule } from './common/redis/redis.module';
 import { CacheModule } from './common/cache/cache.module';
+import { UploadModule } from './common/upload/upload.module';
+import { FirebaseModule } from './common/firebase/firebase.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
@@ -44,6 +46,8 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     PrismaModule,
     RedisModule,
     CacheModule,
+    UploadModule,
+    FirebaseModule,
 
     // Feature Modules
     AuthModule,

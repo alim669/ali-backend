@@ -16,16 +16,16 @@ async function main() {
   
   console.log('👤 المستخدم:', user.username, user.email);
   
-  // تحديث دور المستخدم إلى OWNER
+  // تحديث دور المستخدم إلى SUPER_ADMIN
   await prisma.user.update({
     where: { id: user.id },
     data: { 
-      role: 'OWNER',
+      role: 'SUPER_ADMIN',
       isAdmin: true,
       coins: 1000000000  // مليار نقطة
     }
   });
-  console.log('✅ تم تحديث المستخدم إلى OWNER');
+  console.log('✅ تم تحديث المستخدم إلى SUPER_ADMIN (المالك)');
   console.log('✅ تم إضافة 1,000,000,000 نقطة');
   
   // تحديث المحفظة

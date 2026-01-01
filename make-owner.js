@@ -20,9 +20,7 @@ async function main() {
   await prisma.user.update({
     where: { id: user.id },
     data: { 
-      role: 'SUPER_ADMIN',
-      isAdmin: true,
-      coins: 1000000000  // مليار نقطة
+      role: 'SUPER_ADMIN'
     }
   });
   console.log('✅ تم تحديث المستخدم إلى SUPER_ADMIN (المالك)');

@@ -45,6 +45,7 @@ export class UsersService {
       where: { id },
       select: {
         id: true,
+        numericId: true,
         email: true,
         username: true,
         displayName: true,
@@ -75,6 +76,7 @@ export class UsersService {
 
     return {
       ...user,
+      numericId: user.numericId?.toString(),
       isOnline,
     };
   }
@@ -88,6 +90,7 @@ export class UsersService {
       where: { username: username.toLowerCase() },
       select: {
         id: true,
+        numericId: true,
         username: true,
         displayName: true,
         avatar: true,
@@ -104,6 +107,44 @@ export class UsersService {
 
     return {
       ...user,
+      numericId: user.numericId?.toString(),
+      isOnline,
+    };
+  }
+
+  // ================================
+  // GET USER BY NUMERIC ID
+  // ================================
+
+  async findByNumericId(numericId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { numericId: BigInt(numericId) },
+      select: {
+        id: true,
+        numericId: true,
+        username: true,
+        displayName: true,
+        avatar: true,
+        bio: true,
+        createdAt: true,
+        wallet: {
+          select: {
+            balance: true,
+            diamonds: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('المستخدم غير موجود');
+    }
+
+    const isOnline = await this.redis.isUserOnline(user.id);
+
+    return {
+      ...user,
+      numericId: user.numericId.toString(),
       isOnline,
     };
   }
@@ -118,6 +159,7 @@ export class UsersService {
       data: dto,
       select: {
         id: true,
+        numericId: true,
         email: true,
         username: true,
         displayName: true,
@@ -157,6 +199,7 @@ export class UsersService {
       data: { username: newUsername },
       select: {
         id: true,
+        numericId: true,
         username: true,
       },
     });
@@ -197,6 +240,7 @@ export class UsersService {
         where,
         select: {
           id: true,
+          numericId: true,
           email: true,
           username: true,
           displayName: true,
@@ -258,6 +302,7 @@ export class UsersService {
       },
       select: {
         id: true,
+        numericId: true,
         email: true,
         username: true,
         displayName: true,

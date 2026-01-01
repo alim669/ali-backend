@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
@@ -10,26 +10,37 @@ async function bootstrap() {
   
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    bufferLogs: true,
   });
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
 
-  // Security - تعطيل في التطوير لتجنب مشاكل CORS
-  if (nodeEnv === 'production') {
-    app.use(helmet());
-  }
+  // Security Headers - متقدم
+  app.use(helmet({
+    contentSecurityPolicy: nodeEnv === 'production' ? undefined : false,
+    crossOriginEmbedderPolicy: false,
+  }));
 
-  // CORS - السماح لجميع الأصول في التطوير
+  // CORS - إعدادات متقدمة
+  const corsOrigins = configService.get<string>('CORS_ORIGINS', '*');
   app.enableCors({
-    origin: true, // السماح لجميع الأصول
+    origin: corsOrigins === '*' ? true : corsOrigins.split(','),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Idempotency-Key',
+      'X-Request-ID',
+      'Accept-Language',
+    ],
+    exposedHeaders: ['X-Request-ID', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
     credentials: true,
+    maxAge: 86400, // 24 hours
   });
 
-  // Global Validation Pipe
+  // Global Validation Pipe - متقدم
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -38,36 +49,64 @@ async function bootstrap() {
       transformOptions: {
         enableImplicitConversion: true,
       },
+      disableErrorMessages: nodeEnv === 'production',
+      validationError: {
+        target: false,
+        value: false,
+      },
     }),
   );
 
-  // API Prefix
-  app.setGlobalPrefix('api/v1');
+  // API Prefix and Versioning
+  app.setGlobalPrefix('api');
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: '1',
+  });
 
   // Swagger Documentation
   if (nodeEnv !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Ali App API')
-      .setDescription('Production-ready API for Ali App')
+      .setDescription('Production-ready API for Ali App - Secure & Scalable')
       .setVersion('1.0')
       .addBearerAuth()
-      .addTag('auth', 'Authentication endpoints')
-      .addTag('users', 'User management')
-      .addTag('rooms', 'Room management')
-      .addTag('messages', 'Messaging')
-      .addTag('gifts', 'Gift system')
+      .addServer(`http://localhost:${port}`, 'Local Development')
+      .addServer('http://64.226.115.148', 'Production Server')
+      .addTag('auth', 'Authentication & Authorization')
+      .addTag('users', 'User Management')
+      .addTag('rooms', 'Voice/Chat Rooms')
+      .addTag('messages', 'Real-time Messaging')
+      .addTag('gifts', 'Virtual Gifts System')
+      .addTag('wallets', 'Digital Wallet')
+      .addTag('admin', 'Admin Dashboard')
+      .addTag('monitoring', 'System Monitoring')
       .build();
     
     const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+        tagsSorter: 'alpha',
+        operationsSorter: 'alpha',
+      },
+    });
     
     logger.log(`📚 Swagger docs available at http://localhost:${port}/api/docs`);
   }
 
-  await app.listen(port);
+  // Graceful Shutdown
+  app.enableShutdownHooks();
+
+  // Start Server
+  await app.listen(port, '0.0.0.0');
   
   logger.log(`🚀 Application is running on: http://localhost:${port}`);
   logger.log(`📊 Environment: ${nodeEnv}`);
+  logger.log(`🔒 Security: ${nodeEnv === 'production' ? 'ENABLED' : 'DEVELOPMENT MODE'}`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('❌ Failed to start application:', err);
+  process.exit(1);
+});

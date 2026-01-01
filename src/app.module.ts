@@ -1,14 +1,21 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
-// Modules
+// Common Modules
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RedisModule } from './common/redis/redis.module';
 import { CacheModule } from './common/cache/cache.module';
 import { UploadModule } from './common/upload/upload.module';
 import { FirebaseModule } from './common/firebase/firebase.module';
+import { SecurityModule } from './common/security/security.module';
+import { MonitoringModule } from './common/monitoring/monitoring.module';
+import { SecurityMiddleware } from './common/security/middleware/security.middleware';
+import { LoggingInterceptor } from './common/monitoring/interceptors/logging.interceptor';
+import { PerformanceInterceptor } from './common/monitoring/interceptors/performance.interceptor';
+
+// Feature Modules
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
@@ -31,24 +38,42 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
+      cache: true,
     }),
 
-    // Rate Limiting
+    // Rate Limiting - حماية متقدمة
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ([{
-        ttl: config.get<number>('THROTTLE_TTL', 60) * 1000,
-        limit: config.get<number>('THROTTLE_LIMIT', 100),
-      }]),
+      useFactory: (config: ConfigService) => ([
+        {
+          name: 'short',
+          ttl: 1000, // 1 second
+          limit: 10, // 10 requests per second
+        },
+        {
+          name: 'medium',
+          ttl: 60000, // 1 minute
+          limit: config.get<number>('THROTTLE_LIMIT', 100),
+        },
+        {
+          name: 'long',
+          ttl: 3600000, // 1 hour
+          limit: 1000,
+        },
+      ]),
     }),
 
-    // Database & Cache
+    // Core Infrastructure
     PrismaModule,
     RedisModule,
     CacheModule,
     UploadModule,
     FirebaseModule,
+    
+    // Security & Monitoring
+    SecurityModule,
+    MonitoringModule,
 
     // Feature Modules
     AuthModule,
@@ -65,11 +90,32 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     HealthModule,
   ],
   providers: [
+    // Global Auth Guard
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
     // Global Rate Limiting
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    // Global Logging
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
+    },
+    // Global Performance Monitoring
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: PerformanceInterceptor,
+    },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(SecurityMiddleware)
+      .forRoutes('*');
+  }
+}

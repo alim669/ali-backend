@@ -114,6 +114,12 @@ export class UsersController {
     return this.usersService.findByUsername(username);
   }
 
+  @Get('by-numeric-id/:numericId')
+  @ApiOperation({ summary: 'الحصول على مستخدم بالمعرف الرقمي' })
+  async findByNumericId(@Param('numericId') numericId: string) {
+    return this.usersService.findByNumericId(numericId);
+  }
+
   // ================================
   // ADMIN ENDPOINTS
   // ================================

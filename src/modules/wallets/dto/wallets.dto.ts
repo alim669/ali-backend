@@ -37,6 +37,23 @@ export class WithdrawDto {
   accountInfo?: string;
 }
 
+export class DeductDto {
+  @ApiProperty({ example: 100, description: 'المبلغ المراد خصمه' })
+  @IsInt()
+  @Min(1)
+  amount: number;
+
+  @ApiPropertyOptional({ example: 'coins', description: 'نوع العملة: coins أو diamonds' })
+  @IsOptional()
+  @IsString()
+  type?: string;
+
+  @ApiPropertyOptional({ example: 'شراء شارة', description: 'سبب الخصم' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class AdminAdjustBalanceDto {
   @ApiProperty({ example: 100, description: 'مبلغ موجب للإضافة، سالب للخصم' })
   @IsInt()

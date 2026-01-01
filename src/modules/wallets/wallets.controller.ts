@@ -16,6 +16,7 @@ import { WalletsService } from './wallets.service';
 import {
   DepositDto,
   WithdrawDto,
+  DeductDto,
   AdminAdjustBalanceDto,
   TransactionQueryDto,
 } from './dto/wallets.dto';
@@ -68,6 +69,15 @@ export class WalletsController {
     @Body() dto: WithdrawDto,
   ) {
     return this.walletsService.withdraw(userId, dto);
+  }
+
+  @Post('deduct')
+  @ApiOperation({ summary: 'خصم رصيد (للشراء من المتجر)' })
+  async deduct(
+    @CurrentUser('id') userId: string,
+    @Body() dto: DeductDto,
+  ) {
+    return this.walletsService.deduct(userId, dto);
   }
 
   // ================================

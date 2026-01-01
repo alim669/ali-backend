@@ -38,6 +38,7 @@ export interface TokenPair {
 export interface AuthResponse {
   user: {
     id: string;
+    numericId: string; // ID الرقمي المتسلسل
     email: string;
     username: string;
     displayName: string;
@@ -102,7 +103,7 @@ export class AuthService {
 
       // Create user with transaction
       const user = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        // Create user
+        // Create user (numericId يتم توليده تلقائياً بواسطة PostgreSQL)
         const newUser = await tx.user.create({
           data: {
             email: dto.email.toLowerCase(),
@@ -135,6 +136,7 @@ export class AuthService {
       return {
         user: {
           id: user.id,
+          numericId: user.numericId.toString(),
           email: user.email,
           username: user.username,
           displayName: user.displayName,
@@ -227,6 +229,7 @@ export class AuthService {
       return {
         user: {
           id: user.id,
+          numericId: user.numericId.toString(),
           email: user.email,
           username: user.username,
           displayName: user.displayName,
@@ -304,6 +307,7 @@ export class AuthService {
         const username = await this.generateUniqueUsername(name || email.split('@')[0]);
         
         user = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+          // Create user (numericId يتم توليده تلقائياً)
           const newUser = await tx.user.create({
             data: {
               email: email.toLowerCase(),
@@ -359,6 +363,7 @@ export class AuthService {
     return {
       user: {
         id: user.id,
+        numericId: user.numericId.toString(),
         email: user.email,
         username: user.username,
         displayName: user.displayName,

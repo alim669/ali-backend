@@ -1,6 +1,3 @@
-// Prisma Schema for Ali App Backend
-// Production-ready schema with all required tables
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,9 +7,305 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ================================
-// ENUMS
-// ================================
+// جدول العداد للـ ID المتسلسل (احتياطي - لم يعد مستخدماً)
+model Counter {
+  id        String   @id @default("user_id_counter")
+  value     BigInt   @default(100000000) // يبدأ من 100 مليون
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id              String         @id @default(uuid())
+  numericId       BigInt         @unique @default(autoincrement()) // ID الرقمي - يبدأ من 100 مليون
+  email           String         @unique
+  passwordHash    String?
+  googleId        String?        @unique
+  authProvider    AuthProvider   @default(EMAIL)
+  username        String         @unique
+  displayName     String
+  avatar          String?
+  bio             String?
+  role            UserRole       @default(USER)
+  status          UserStatus     @default(ACTIVE)
+  emailVerified   Boolean        @default(false)
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  adminActions    AdminAction[]  @relation("AdminActor")
+  actionsReceived AdminAction[]  @relation("AdminTarget")
+  following       Follow[]       @relation("Follower")
+  followers       Follow[]       @relation("Following")
+  giftsReceived   GiftSend[]     @relation("GiftReceiver")
+  giftsSent       GiftSend[]     @relation("GiftSender")
+  sentMessages    Message[]      @relation("MessageSender")
+  notifications   Notification[]
+  refreshTokens   RefreshToken[]
+  reportsReceived Report[]       @relation("ReportedUser")
+  reportsMade     Report[]       @relation("Reporter")
+  reportsResolved Report[]       @relation("ReportResolver")
+  ownedRooms      Room[]         @relation("RoomOwner")
+  roomMemberships RoomMember[]
+  wallet          Wallet?
+
+  @@index([email])
+  @@index([googleId])
+  @@index([username])
+  @@index([status])
+  @@index([createdAt])
+  @@index([numericId])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  token      String    @unique
+  userId     String
+  deviceInfo String?
+  ipAddress  String?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model Room {
+  id                  String       @id @default(uuid())
+  name                String
+  description         String?
+  avatar              String?
+  type                RoomType     @default(PUBLIC)
+  status              RoomStatus   @default(ACTIVE)
+  ownerId             String
+  maxMembers          Int          @default(100)
+  currentMembers      Int          @default(0)
+  isPasswordProtected Boolean      @default(false)
+  passwordHash        String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  giftsSent           GiftSend[]
+  messages            Message[]
+  reports             Report[]
+  owner               User         @relation("RoomOwner", fields: [ownerId], references: [id])
+  members             RoomMember[]
+
+  @@index([ownerId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RoomMember {
+  id          String     @id @default(uuid())
+  roomId      String
+  userId      String
+  role        MemberRole @default(MEMBER)
+  isMuted     Boolean    @default(false)
+  mutedUntil  DateTime?
+  isBanned    Boolean    @default(false)
+  bannedUntil DateTime?
+  joinedAt    DateTime   @default(now())
+  leftAt      DateTime?
+  room        Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@index([role])
+}
+
+model Message {
+  id         String      @id @default(uuid())
+  roomId     String
+  senderId   String
+  type       MessageType @default(TEXT)
+  content    String
+  metadata   Json?
+  giftSendId String?     @unique
+  isDeleted  Boolean     @default(false)
+  deletedAt  DateTime?
+  deletedBy  String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  giftSend   GiftSend?   @relation(fields: [giftSendId], references: [id])
+  room       Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender     User        @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([roomId])
+  @@index([senderId])
+  @@index([createdAt])
+  @@index([roomId, createdAt])
+}
+
+model Gift {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  type         GiftType   @default(STANDARD)
+  imageUrl     String
+  animationUrl String?
+  videoUrl     String?
+  price        Int
+  isActive     Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  giftSends    GiftSend[]
+
+  @@index([type])
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model GiftSend {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  giftId         String
+  senderId       String
+  receiverId     String
+  roomId         String?
+  quantity       Int      @default(1)
+  totalPrice     Int
+  message        String?
+  createdAt      DateTime @default(now())
+  gift           Gift     @relation(fields: [giftId], references: [id])
+  receiver       User     @relation("GiftReceiver", fields: [receiverId], references: [id])
+  room           Room?    @relation(fields: [roomId], references: [id])
+  sender         User     @relation("GiftSender", fields: [senderId], references: [id])
+  chatMessage    Message?
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([roomId])
+  @@index([giftId])
+  @@index([createdAt])
+  @@index([idempotencyKey])
+}
+
+model Wallet {
+  id           String              @id @default(uuid())
+  userId       String              @unique
+  balance      Int                 @default(0)
+  diamonds     Int                 @default(0)
+  version      Int                 @default(0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@index([userId])
+}
+
+model WalletTransaction {
+  id            String            @id @default(uuid())
+  walletId      String
+  type          TransactionType
+  status        TransactionStatus @default(COMPLETED)
+  amount        Int
+  balanceBefore Int
+  balanceAfter  Int
+  referenceType String?
+  referenceId   String?
+  description   String?
+  metadata      Json?
+  createdAt     DateTime          @default(now())
+  wallet        Wallet            @relation(fields: [walletId], references: [id])
+
+  @@index([walletId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model AdminAction {
+  id        String          @id @default(uuid())
+  actorId   String
+  targetId  String?
+  action    AdminActionType
+  reason    String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime        @default(now())
+  actor     User            @relation("AdminActor", fields: [actorId], references: [id])
+  target    User?           @relation("AdminTarget", fields: [targetId], references: [id])
+
+  @@index([actorId])
+  @@index([targetId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model Report {
+  id             String       @id @default(uuid())
+  reporterId     String
+  reportedUserId String?
+  reportedRoomId String?
+  type           ReportType
+  status         ReportStatus @default(PENDING)
+  reason         String
+  details        String?
+  resolvedById   String?
+  resolution     String?
+  resolvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  reportedRoom   Room?        @relation(fields: [reportedRoomId], references: [id])
+  reportedUser   User?        @relation("ReportedUser", fields: [reportedUserId], references: [id])
+  reporter       User         @relation("Reporter", fields: [reporterId], references: [id])
+  resolvedBy     User?        @relation("ReportResolver", fields: [resolvedById], references: [id])
+
+  @@index([reporterId])
+  @@index([reportedUserId])
+  @@index([reportedRoomId])
+  @@index([status])
+  @@index([createdAt])
+}
 
 enum UserRole {
   USER
@@ -96,347 +389,6 @@ enum AdminActionType {
   SETTINGS_CHANGED
 }
 
-// ================================
-// USER & AUTH TABLES
-// ================================
-
-model User {
-  id              String      @id @default(uuid())
-  email           String      @unique
-  passwordHash    String?     // null for Google-only users
-  googleId        String?     @unique
-  authProvider    AuthProvider @default(EMAIL)
-  
-  // Profile
-  username        String      @unique
-  displayName     String
-  avatar          String?
-  bio             String?
-  
-  // Status
-  role            UserRole    @default(USER)
-  status          UserStatus  @default(ACTIVE)
-  emailVerified   Boolean     @default(false)
-  
-  // Metadata
-  lastLoginAt     DateTime?
-  lastLoginIp     String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  
-  // Relations
-  refreshTokens   RefreshToken[]
-  wallet          Wallet?
-  ownedRooms      Room[]         @relation("RoomOwner")
-  roomMemberships RoomMember[]
-  sentMessages    Message[]      @relation("MessageSender")
-  giftsSent       GiftSend[]     @relation("GiftSender")
-  giftsReceived   GiftSend[]     @relation("GiftReceiver")
-  adminActions    AdminAction[]  @relation("AdminActor")
-  actionsReceived AdminAction[]  @relation("AdminTarget")
-  
-  // New relations
-  notifications   Notification[]
-  followers       Follow[]       @relation("Following")
-  following       Follow[]       @relation("Follower")
-  reportsMade     Report[]       @relation("Reporter")
-  reportsReceived Report[]       @relation("ReportedUser")
-  reportsResolved Report[]       @relation("ReportResolver")
-
-  @@index([email])
-  @@index([googleId])
-  @@index([username])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model RefreshToken {
-  id          String   @id @default(uuid())
-  token       String   @unique
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  deviceInfo  String?  // Device/browser info
-  ipAddress   String?
-  
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
-  revokedAt   DateTime?
-  
-  @@index([userId])
-  @@index([token])
-  @@index([expiresAt])
-}
-
-// ================================
-// ROOM TABLES
-// ================================
-
-model Room {
-  id              String      @id @default(uuid())
-  name            String
-  description     String?
-  avatar          String?
-  
-  type            RoomType    @default(PUBLIC)
-  status          RoomStatus  @default(ACTIVE)
-  
-  ownerId         String
-  owner           User        @relation("RoomOwner", fields: [ownerId], references: [id])
-  
-  maxMembers      Int         @default(100)
-  currentMembers  Int         @default(0)
-  
-  // Settings
-  isPasswordProtected Boolean @default(false)
-  passwordHash    String?
-  
-  // Metadata
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  
-  // Relations
-  members         RoomMember[]
-  messages        Message[]
-  giftsSent       GiftSend[]
-  reports         Report[]
-
-  @@index([ownerId])
-  @@index([type])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model RoomMember {
-  id          String      @id @default(uuid())
-  roomId      String
-  room        Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  role        MemberRole  @default(MEMBER)
-  
-  // Status
-  isMuted     Boolean     @default(false)
-  mutedUntil  DateTime?
-  isBanned    Boolean     @default(false)
-  bannedUntil DateTime?
-  
-  joinedAt    DateTime    @default(now())
-  leftAt      DateTime?
-
-  @@unique([roomId, userId])
-  @@index([roomId])
-  @@index([userId])
-  @@index([role])
-}
-
-// ================================
-// MESSAGE TABLES
-// ================================
-
-model Message {
-  id          String      @id @default(uuid())
-  roomId      String
-  room        Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  senderId    String
-  sender      User        @relation("MessageSender", fields: [senderId], references: [id])
-  
-  type        MessageType @default(TEXT)
-  content     String
-  metadata    Json?       // For images, audio, etc.
-  
-  // For gift messages
-  giftSendId  String?     @unique
-  giftSend    GiftSend?   @relation(fields: [giftSendId], references: [id])
-  
-  // Status
-  isDeleted   Boolean     @default(false)
-  deletedAt   DateTime?
-  deletedBy   String?
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-
-  @@index([roomId])
-  @@index([senderId])
-  @@index([createdAt])
-  @@index([roomId, createdAt]) // Composite for pagination
-}
-
-// ================================
-// GIFT TABLES
-// ================================
-
-model Gift {
-  id              String    @id @default(uuid())
-  name            String
-  description     String?
-  
-  type            GiftType  @default(STANDARD)
-  
-  // Assets
-  imageUrl        String
-  animationUrl    String?   // For animated gifts
-  videoUrl        String?   // For VIP video gifts
-  
-  // Pricing
-  price           Int       // In app coins
-  
-  // Status
-  isActive        Boolean   @default(true)
-  sortOrder       Int       @default(0)
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Relations
-  giftSends       GiftSend[]
-
-  @@index([type])
-  @@index([isActive])
-  @@index([sortOrder])
-}
-
-model GiftSend {
-  id              String    @id @default(uuid())
-  
-  // Idempotency key to prevent duplicate sends
-  idempotencyKey  String    @unique
-  
-  giftId          String
-  gift            Gift      @relation(fields: [giftId], references: [id])
-  
-  senderId        String
-  sender          User      @relation("GiftSender", fields: [senderId], references: [id])
-  
-  receiverId      String
-  receiver        User      @relation("GiftReceiver", fields: [receiverId], references: [id])
-  
-  roomId          String?
-  room            Room?     @relation(fields: [roomId], references: [id])
-  
-  // Amount
-  quantity        Int       @default(1)
-  totalPrice      Int       // price * quantity at time of send
-  
-  // Optional message
-  message         String?
-  
-  createdAt       DateTime  @default(now())
-  
-  // Related message in room
-  chatMessage     Message?
-
-  @@index([senderId])
-  @@index([receiverId])
-  @@index([roomId])
-  @@index([giftId])
-  @@index([createdAt])
-  @@index([idempotencyKey])
-}
-
-// ================================
-// WALLET & TRANSACTIONS
-// ================================
-
-model Wallet {
-  id          String    @id @default(uuid())
-  userId      String    @unique
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  balance     Int       @default(0) // Main balance (coins)
-  diamonds    Int       @default(0) // Premium currency
-  
-  // For optimistic locking
-  version     Int       @default(0)
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
-  transactions WalletTransaction[]
-
-  @@index([userId])
-}
-
-model WalletTransaction {
-  id              String            @id @default(uuid())
-  walletId        String
-  wallet          Wallet            @relation(fields: [walletId], references: [id])
-  
-  type            TransactionType
-  status          TransactionStatus @default(COMPLETED)
-  
-  amount          Int               // Positive for credit, negative for debit
-  balanceBefore   Int
-  balanceAfter    Int
-  
-  // Reference to related entity
-  referenceType   String?           // 'gift_send', 'purchase', etc.
-  referenceId     String?
-  
-  description     String?
-  metadata        Json?
-  
-  createdAt       DateTime          @default(now())
-
-  @@index([walletId])
-  @@index([type])
-  @@index([status])
-  @@index([createdAt])
-  @@index([referenceType, referenceId])
-}
-
-// ================================
-// ADMIN & AUDIT
-// ================================
-
-model AdminAction {
-  id          String          @id @default(uuid())
-  
-  actorId     String
-  actor       User            @relation("AdminActor", fields: [actorId], references: [id])
-  
-  targetId    String?
-  target      User?           @relation("AdminTarget", fields: [targetId], references: [id])
-  
-  action      AdminActionType
-  
-  // Details
-  reason      String?
-  details     Json?
-  
-  // IP tracking
-  ipAddress   String?
-  
-  createdAt   DateTime        @default(now())
-
-  @@index([actorId])
-  @@index([targetId])
-  @@index([action])
-  @@index([createdAt])
-}
-
-// ================================
-// SYSTEM SETTINGS
-// ================================
-
-model SystemSetting {
-  id          String    @id @default(uuid())
-  key         String    @unique
-  value       Json
-  description String?
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  @@index([key])
-}
-
-// ================================
-// NOTIFICATIONS
-// ================================
-
 enum NotificationType {
   GIFT_RECEIVED
   NEW_FOLLOWER
@@ -446,49 +398,6 @@ enum NotificationType {
   LIKE
   COMMENT
 }
-
-model Notification {
-  id          String            @id @default(uuid())
-  userId      String
-  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  type        NotificationType
-  title       String
-  body        String
-  data        Json?             // Extra data (e.g., roomId, senderId)
-  
-  isRead      Boolean           @default(false)
-  readAt      DateTime?
-  
-  createdAt   DateTime          @default(now())
-
-  @@index([userId])
-  @@index([userId, isRead])
-  @@index([createdAt])
-}
-
-// ================================
-// FOLLOWS (User Following System)
-// ================================
-
-model Follow {
-  id          String    @id @default(uuid())
-  followerId  String
-  follower    User      @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
-  
-  followingId String
-  following   User      @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime  @default(now())
-
-  @@unique([followerId, followingId])
-  @@index([followerId])
-  @@index([followingId])
-}
-
-// ================================
-// REPORTS (User Reports System)
-// ================================
 
 enum ReportType {
   SPAM
@@ -503,37 +412,4 @@ enum ReportStatus {
   REVIEWING
   RESOLVED
   DISMISSED
-}
-
-model Report {
-  id              String        @id @default(uuid())
-  
-  reporterId      String
-  reporter        User          @relation("Reporter", fields: [reporterId], references: [id])
-  
-  reportedUserId  String?
-  reportedUser    User?         @relation("ReportedUser", fields: [reportedUserId], references: [id])
-  
-  reportedRoomId  String?
-  reportedRoom    Room?         @relation(fields: [reportedRoomId], references: [id])
-  
-  type            ReportType
-  status          ReportStatus  @default(PENDING)
-  reason          String
-  details         String?
-  
-  // Admin response
-  resolvedById    String?
-  resolvedBy      User?         @relation("ReportResolver", fields: [resolvedById], references: [id])
-  resolution      String?
-  resolvedAt      DateTime?
-  
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  @@index([reporterId])
-  @@index([reportedUserId])
-  @@index([reportedRoomId])
-  @@index([status])
-  @@index([createdAt])
 }

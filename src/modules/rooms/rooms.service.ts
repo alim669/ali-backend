@@ -35,6 +35,8 @@ export class RoomsService {
   // ================================
 
   async create(dto: CreateRoomDto, userId: string) {
+    this.logger.log(`📦 Creating room: name="${dto.name}", type="${dto.type}", userId="${userId}"`);
+    
     let passwordHash: string | null = null;
 
     if (dto.password) {
@@ -89,6 +91,8 @@ export class RoomsService {
   // ================================
 
   async findAll(query: RoomQueryDto) {
+    this.logger.log(`🔍 findAll rooms query: ${JSON.stringify(query)}`);
+    
     const {
       page = 1,
       limit = 20,
@@ -142,6 +146,8 @@ export class RoomsService {
       }),
       this.prisma.room.count({ where }),
     ]);
+
+    this.logger.log(`🔍 findAll found ${rooms.length} rooms (total: ${total})`);
 
     // Add online counts from Redis
     const roomsWithOnline = await Promise.all(

@@ -1,0 +1,47 @@
+[Unit]
+Description=Ali Backend NestJS Application
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/var/www/ali-backend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+# Load environment from file
+EnvironmentFile=/var/www/ali-backend/.env
+
+# Command to start the application
+ExecStart=/usr/bin/node /var/www/ali-backend/dist/main.js
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -TERM $MAINPID
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=ali-backend
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/www/ali-backend/logs /var/www/uploads
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+MemoryMax=512M
+CPUQuota=80%
+
+# Timeout settings
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

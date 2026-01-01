@@ -2,32 +2,25 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const userId = 'bcbed248-159e-46d3-9f30-9a95ce700b11';
-  
-  // تحديث دور المستخدم إلى ADMIN
-  await prisma.user.update({
-    where: { id: userId },
-    data: { role: 'ADMIN' }
-  });
-  console.log('✅ Updated user role to ADMIN');
-  
-  // إضافة نقاط للمحفظة
-  const wallet = await prisma.wallet.upsert({
-    where: { userId: userId },
-    update: { 
+  // إضافة 1000000 عملة لجميع المحفظات
+  const result = await prisma.wallet.updateMany({
+    data: {
       balance: 1000000,
-      diamonds: 10000 
-    },
-    create: {
-      userId: userId,
-      balance: 1000000,
-      diamonds: 10000
+      diamonds: 10000,
     }
   });
   
-  console.log('✅ Wallet updated:', wallet);
-  console.log(`   Balance (Coins): ${wallet.balance}`);
-  console.log(`   Diamonds: ${wallet.diamonds}`);
+  console.log(`✅ تم تحديث ${result.count} محفظة بـ 1,000,000 عملة و 10,000 ماسة`);
+  
+  // عرض النتيجة
+  const wallets = await prisma.wallet.findMany({
+    include: { user: { select: { email: true, username: true } } }
+  });
+  
+  console.log('\nالمحفظات:');
+  wallets.forEach(w => {
+    console.log(`- ${w.user.email} (${w.user.username}): ${w.balance} coins, ${w.diamonds} diamonds`);
+  });
 }
 
 main()

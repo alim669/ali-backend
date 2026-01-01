@@ -1,0 +1,49 @@
+{
+  "apps": [
+    {
+      "name": "ali-backend",
+      "script": "dist/main.js",
+      "instances": "max",
+      "exec_mode": "cluster",
+      "watch": false,
+      "max_memory_restart": "500M",
+      "env": {
+        "NODE_ENV": "production"
+      },
+      "env_development": {
+        "NODE_ENV": "development"
+      },
+      "log_date_format": "YYYY-MM-DD HH:mm:ss Z",
+      "error_file": "./logs/error.log",
+      "out_file": "./logs/out.log",
+      "merge_logs": true,
+      "log_type": "json",
+      "time": true,
+      "kill_timeout": 5000,
+      "listen_timeout": 10000,
+      "max_restarts": 10,
+      "min_uptime": "10s",
+      "autorestart": true,
+      "restart_delay": 1000,
+      "exp_backoff_restart_delay": 100,
+      "cron_restart": "0 3 * * *",
+      "health_check_grace_period": 3000
+    }
+  ],
+  "deploy": {
+    "production": {
+      "user": "deploy",
+      "host": ["64.226.115.148"],
+      "ref": "origin/main",
+      "repo": "git@github.com:username/ali-backend.git",
+      "path": "/var/www/ali-backend",
+      "ssh_options": "StrictHostKeyChecking=no",
+      "pre-deploy-local": "",
+      "post-deploy": "npm ci --production && npx prisma migrate deploy && npm run build && pm2 reload ecosystem.config.json --env production",
+      "pre-setup": "",
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}

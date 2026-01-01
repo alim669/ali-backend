@@ -8,6 +8,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   DepositDto,
   WithdrawDto,
+  DeductDto,
   AdminAdjustBalanceDto,
   TransactionQueryDto,
 } from './dto/wallets.dto';
@@ -162,6 +163,66 @@ export class WalletsService {
       transactionId: result.transaction.id,
       status: 'pending',
       message: 'تم إرسال طلب السحب وسيتم مراجعته',
+    };
+  }
+
+  // ================================
+  // DEDUCT (For purchases)
+  // ================================
+
+  async deduct(userId: string, dto: DeductDto) {
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('المحفظة غير موجودة');
+    }
+
+    // Check balance based on type
+    const balanceToCheck = dto.type === 'diamonds' ? wallet.diamonds : wallet.balance;
+    
+    if (balanceToCheck < dto.amount) {
+      throw new BadRequestException('رصيد غير كافي');
+    }
+
+    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Update balance based on type
+      const updateData = dto.type === 'diamonds'
+        ? { diamonds: { decrement: dto.amount }, version: { increment: 1 } }
+        : { balance: { decrement: dto.amount }, version: { increment: 1 } };
+
+      const updatedWallet = await tx.wallet.update({
+        where: { id: wallet.id },
+        data: updateData,
+      });
+
+      const balanceBefore = dto.type === 'diamonds' ? wallet.diamonds : wallet.balance;
+      const balanceAfter = dto.type === 'diamonds' ? updatedWallet.diamonds : updatedWallet.balance;
+
+      await tx.walletTransaction.create({
+        data: {
+          walletId: wallet.id,
+          type: TransactionType.PURCHASE,
+          status: TransactionStatus.COMPLETED,
+          amount: -dto.amount,
+          balanceBefore,
+          balanceAfter,
+          description: dto.reason || 'عملية شراء',
+          metadata: {
+            type: dto.type || 'coins',
+          },
+        },
+      });
+
+      return updatedWallet;
+    });
+
+    this.logger.log(`Deduct: ${dto.amount} ${dto.type || 'coins'} from user ${userId}`);
+
+    return {
+      success: true,
+      newBalance: dto.type === 'diamonds' ? result.diamonds : result.balance,
     };
   }
 

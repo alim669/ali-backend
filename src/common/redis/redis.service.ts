@@ -316,6 +316,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   
   // In-memory rate limit counters
   private memoryRateLimits = new Map<string, { count: number; expiresAt: number }>();
+  
+  // In-memory sorted sets
+  private memorySortedSets = new Map<string, Map<string, number>>();
 
   async checkRateLimit(key: string, limit: number, windowSeconds: number): Promise<boolean> {
     if (!this.isEnabled()) {
@@ -333,6 +336,132 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await this.client!.expire(key, windowSeconds);
     }
     return current <= limit;
+  }
+
+  // ================================
+  // Increment/Decrement Operations
+  // ================================
+
+  async incr(key: string): Promise<number> {
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      const current = entry ? parseInt(entry.value) || 0 : 0;
+      const newValue = current + 1;
+      this.memoryCache.set(key, { value: newValue.toString(), expiresAt: entry?.expiresAt });
+      return newValue;
+    }
+    return this.client!.incr(key);
+  }
+
+  async expire(key: string, seconds: number): Promise<void> {
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      if (entry) {
+        entry.expiresAt = Date.now() + seconds * 1000;
+      }
+      return;
+    }
+    await this.client!.expire(key, seconds);
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    if (!this.isEnabled()) {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      return Array.from(this.memoryCache.keys()).filter(k => regex.test(k));
+    }
+    return this.client!.keys(pattern);
+  }
+
+  // ================================
+  // Sorted Set Operations (for rate limiting)
+  // ================================
+
+  async zadd(key: string, score: number, member: string): Promise<void> {
+    if (!this.isEnabled()) {
+      if (!this.memorySortedSets.has(key)) {
+        this.memorySortedSets.set(key, new Map());
+      }
+      this.memorySortedSets.get(key)!.set(member, score);
+      return;
+    }
+    await this.client!.zadd(key, score, member);
+  }
+
+  async zcard(key: string): Promise<number> {
+    if (!this.isEnabled()) {
+      return this.memorySortedSets.get(key)?.size || 0;
+    }
+    return this.client!.zcard(key);
+  }
+
+  async zrange(key: string, start: number, stop: number, withScores?: string): Promise<string[]> {
+    if (!this.isEnabled()) {
+      const set = this.memorySortedSets.get(key);
+      if (!set) return [];
+      const entries = Array.from(set.entries())
+        .sort((a, b) => a[1] - b[1])
+        .slice(start, stop === -1 ? undefined : stop + 1);
+      if (withScores === 'WITHSCORES') {
+        return entries.flatMap(([member, score]) => [member, score.toString()]);
+      }
+      return entries.map(([member]) => member);
+    }
+    if (withScores === 'WITHSCORES') {
+      return this.client!.zrange(key, start, stop, 'WITHSCORES');
+    }
+    return this.client!.zrange(key, start, stop);
+  }
+
+  async zremrangebyscore(key: string, min: number, max: number): Promise<void> {
+    if (!this.isEnabled()) {
+      const set = this.memorySortedSets.get(key);
+      if (set) {
+        for (const [member, score] of set.entries()) {
+          if (score >= min && score <= max) {
+            set.delete(member);
+          }
+        }
+      }
+      return;
+    }
+    await this.client!.zremrangebyscore(key, min, max);
+  }
+
+  // ================================
+  // List Operations (for metrics)
+  // ================================
+
+  private memoryLists = new Map<string, string[]>();
+
+  async lpush(key: string, value: string): Promise<void> {
+    if (!this.isEnabled()) {
+      if (!this.memoryLists.has(key)) {
+        this.memoryLists.set(key, []);
+      }
+      this.memoryLists.get(key)!.unshift(value);
+      return;
+    }
+    await this.client!.lpush(key, value);
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<void> {
+    if (!this.isEnabled()) {
+      const list = this.memoryLists.get(key);
+      if (list) {
+        const newList = list.slice(start, stop === -1 ? undefined : stop + 1);
+        this.memoryLists.set(key, newList);
+      }
+      return;
+    }
+    await this.client!.ltrim(key, start, stop);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (!this.isEnabled()) {
+      const list = this.memoryLists.get(key) || [];
+      return list.slice(start, stop === -1 ? undefined : stop + 1);
+    }
+    return this.client!.lrange(key, start, stop);
   }
 
   // ================================

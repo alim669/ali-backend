@@ -27,12 +27,14 @@ import {
 } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { Public } from './decorators/public.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute
   @ApiOperation({ summary: 'تسجيل مستخدم جديد بالبريد الإلكتروني' })
@@ -43,6 +45,7 @@ export class AuthController {
     return this.authService.register(dto, ipAddress);
   }
 
+  @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
@@ -54,6 +57,7 @@ export class AuthController {
     return this.authService.login(dto, ipAddress);
   }
 
+  @Public()
   @Post('google')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
@@ -65,6 +69,7 @@ export class AuthController {
     return this.authService.googleLogin(dto, ipAddress);
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60000 } })

@@ -1,0 +1,47 @@
+# Prometheus Configuration for Ali Backend
+# إعدادات Prometheus للمراقبة
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'ali-backend'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - 'alert_rules.yml'
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Backend Application
+  - job_name: 'ali-backend'
+    metrics_path: '/api/v1/monitoring/metrics'
+    bearer_token_file: '/etc/prometheus/api_token'
+    static_configs:
+      - targets: ['backend:3000']
+        labels:
+          app: 'ali-backend'
+          env: 'production'
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # PostgreSQL
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # Nginx
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:80']

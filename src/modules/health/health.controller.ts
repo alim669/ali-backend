@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('health')
 @Controller('health')
@@ -11,6 +12,7 @@ export class HealthController {
     private redis: RedisService,
   ) {}
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Health check' })
   async check() {

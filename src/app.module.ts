@@ -20,6 +20,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { FollowsModule } from './modules/follows/follows.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { HealthModule } from './modules/health/health.module';
 
 // Guards
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -61,6 +62,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     NotificationsModule,
     FollowsModule,
     ReportsModule,
+    HealthModule,
   ],
   providers: [
     // Global Rate Limiting

@@ -1,157 +1,111 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { v2 as cloudinary } from 'cloudinary';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface UploadResult {
   url: string;
-  publicId: string;
-  width?: number;
-  height?: number;
+  filename: string;
+  path: string;
 }
 
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
-  private readonly isConfigured: boolean;
+  private readonly uploadDir: string;
+  private readonly baseUrl: string;
 
   constructor(private configService: ConfigService) {
-    const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
-    const apiKey = this.configService.get<string>('CLOUDINARY_API_KEY');
-    const apiSecret = this.configService.get<string>('CLOUDINARY_API_SECRET');
+    this.uploadDir = this.configService.get<string>('UPLOAD_DIR', '/var/www/uploads');
+    this.baseUrl = this.configService.get<string>('BASE_URL', 'http://64.226.115.148');
+    
+    // Create upload directories
+    this.ensureDirectories();
+    this.logger.log(`📁 Upload service initialized: ${this.uploadDir}`);
+  }
 
-    if (cloudName && apiKey && apiSecret) {
-      cloudinary.config({
-        cloud_name: cloudName,
-        api_key: apiKey,
-        api_secret: apiSecret,
-      });
-      this.isConfigured = true;
-      this.logger.log('☁️ Cloudinary configured successfully');
-    } else {
-      this.isConfigured = false;
-      this.logger.warn('⚠️ Cloudinary not configured - uploads disabled');
+  private ensureDirectories() {
+    const dirs = ['avatars', 'rooms', 'messages', 'gifts'];
+    for (const dir of dirs) {
+      const fullPath = path.join(this.uploadDir, dir);
+      if (!fs.existsSync(fullPath)) {
+        fs.mkdirSync(fullPath, { recursive: true });
+      }
     }
   }
 
   async uploadImage(
     file: Express.Multer.File,
-    folder: string = 'ali-app',
+    folder: string = 'general',
   ): Promise<UploadResult> {
-    if (!this.isConfigured) {
-      throw new BadRequestException('خدمة رفع الصور غير متاحة');
-    }
-
-    return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder,
-          resource_type: 'image',
-          transformation: [
-            { width: 500, height: 500, crop: 'limit' },
-            { quality: 'auto', fetch_format: 'auto' },
-          ],
-        },
-        (error, result) => {
-          if (error) {
-            this.logger.error(`Upload failed: ${error.message}`);
-            reject(new BadRequestException('فشل رفع الصورة'));
-          } else if (result) {
-            resolve({
-              url: result.secure_url,
-              publicId: result.public_id,
-              width: result.width,
-              height: result.height,
-            });
-          }
-        },
-      );
-
-      uploadStream.end(file.buffer);
-    });
+    const filename = `${uuidv4()}${path.extname(file.originalname)}`;
+    const filePath = path.join(this.uploadDir, folder, filename);
+    
+    await fs.promises.writeFile(filePath, file.buffer);
+    
+    const url = `${this.baseUrl}/uploads/${folder}/${filename}`;
+    this.logger.log(`📤 Image uploaded: ${url}`);
+    
+    return {
+      url,
+      filename,
+      path: filePath,
+    };
   }
 
   async uploadAvatar(file: Express.Multer.File, userId: string): Promise<UploadResult> {
-    if (!this.isConfigured) {
-      throw new BadRequestException('خدمة رفع الصور غير متاحة');
-    }
-
-    return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'ali-app/avatars',
-          public_id: `avatar_${userId}`,
-          resource_type: 'image',
-          overwrite: true,
-          transformation: [
-            { width: 200, height: 200, crop: 'fill', gravity: 'face' },
-            { quality: 'auto', fetch_format: 'auto' },
-          ],
-        },
-        (error, result) => {
-          if (error) {
-            this.logger.error(`Avatar upload failed: ${error.message}`);
-            reject(new BadRequestException('فشل رفع صورة الملف الشخصي'));
-          } else if (result) {
-            resolve({
-              url: result.secure_url,
-              publicId: result.public_id,
-              width: result.width,
-              height: result.height,
-            });
-          }
-        },
-      );
-
-      uploadStream.end(file.buffer);
-    });
+    const ext = path.extname(file.originalname) || '.jpg';
+    const filename = `avatar_${userId}${ext}`;
+    const filePath = path.join(this.uploadDir, 'avatars', filename);
+    
+    // Delete old avatar if exists
+    try {
+      const files = await fs.promises.readdir(path.join(this.uploadDir, 'avatars'));
+      for (const f of files) {
+        if (f.startsWith(`avatar_${userId}`)) {
+          await fs.promises.unlink(path.join(this.uploadDir, 'avatars', f));
+        }
+      }
+    } catch (e) {}
+    
+    await fs.promises.writeFile(filePath, file.buffer);
+    
+    const url = `${this.baseUrl}/uploads/avatars/${filename}`;
+    this.logger.log(`📤 Avatar uploaded: ${url}`);
+    
+    return {
+      url,
+      filename,
+      path: filePath,
+    };
   }
 
   async uploadRoomImage(file: Express.Multer.File, roomId: string): Promise<UploadResult> {
-    if (!this.isConfigured) {
-      throw new BadRequestException('خدمة رفع الصور غير متاحة');
-    }
-
-    return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'ali-app/rooms',
-          public_id: `room_${roomId}`,
-          resource_type: 'image',
-          overwrite: true,
-          transformation: [
-            { width: 400, height: 300, crop: 'fill' },
-            { quality: 'auto', fetch_format: 'auto' },
-          ],
-        },
-        (error, result) => {
-          if (error) {
-            this.logger.error(`Room image upload failed: ${error.message}`);
-            reject(new BadRequestException('فشل رفع صورة الغرفة'));
-          } else if (result) {
-            resolve({
-              url: result.secure_url,
-              publicId: result.public_id,
-              width: result.width,
-              height: result.height,
-            });
-          }
-        },
-      );
-
-      uploadStream.end(file.buffer);
-    });
+    const ext = path.extname(file.originalname) || '.jpg';
+    const filename = `room_${roomId}${ext}`;
+    const filePath = path.join(this.uploadDir, 'rooms', filename);
+    
+    await fs.promises.writeFile(filePath, file.buffer);
+    
+    const url = `${this.baseUrl}/uploads/rooms/${filename}`;
+    this.logger.log(`📤 Room image uploaded: ${url}`);
+    
+    return {
+      url,
+      filename,
+      path: filePath,
+    };
   }
 
-  async deleteImage(publicId: string): Promise<void> {
-    if (!this.isConfigured) {
-      return;
-    }
-
+  async deleteImage(filePath: string): Promise<void> {
     try {
-      await cloudinary.uploader.destroy(publicId);
-      this.logger.log(`Image deleted: ${publicId}`);
+      if (fs.existsSync(filePath)) {
+        await fs.promises.unlink(filePath);
+        this.logger.log(`🗑️ Image deleted: ${filePath}`);
+      }
     } catch (error) {
-      this.logger.error(`Failed to delete image: ${error.message}`);
+      this.logger.error(`Failed to delete: ${error.message}`);
     }
   }
 }

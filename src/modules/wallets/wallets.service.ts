@@ -29,6 +29,15 @@ export class WalletsService {
     });
 
     if (!wallet) {
+      // Verify user exists first
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('المستخدم غير موجود');
+      }
+
       // Create wallet if doesn't exist
       wallet = await this.prisma.wallet.create({
         data: {

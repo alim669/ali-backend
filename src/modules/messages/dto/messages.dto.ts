@@ -4,12 +4,12 @@ import {
   IsEnum,
   MaxLength,
   IsObject,
-} from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { MessageType } from '@prisma/client';
+} from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { MessageType } from "@prisma/client";
 
 export class SendMessageDto {
-  @ApiProperty({ example: 'مرحباً بالجميع!' })
+  @ApiProperty({ example: "مرحباً بالجميع!" })
   @IsString()
   @MaxLength(5000)
   content: string;
@@ -19,7 +19,7 @@ export class SendMessageDto {
   @IsEnum(MessageType)
   type?: MessageType = MessageType.TEXT;
 
-  @ApiPropertyOptional({ description: 'بيانات إضافية (للصور/الصوت/الفيديو)' })
+  @ApiPropertyOptional({ description: "بيانات إضافية (للصور/الصوت/الفيديو)" })
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
@@ -34,11 +34,11 @@ export class MessageQueryDto {
   @IsOptional()
   limit?: number = 50;
 
-  @ApiPropertyOptional({ description: 'قبل هذا التاريخ' })
+  @ApiPropertyOptional({ description: "قبل هذا التاريخ" })
   @IsOptional()
   before?: Date;
 
-  @ApiPropertyOptional({ description: 'بعد هذا التاريخ' })
+  @ApiPropertyOptional({ description: "بعد هذا التاريخ" })
   @IsOptional()
   after?: Date;
 

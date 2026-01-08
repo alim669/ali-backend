@@ -1,8 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as fs from 'fs';
-import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as fs from "fs";
+import * as path from "path";
+import { v4 as uuidv4 } from "uuid";
 
 export interface UploadResult {
   url: string;
@@ -17,16 +17,22 @@ export class UploadService {
   private readonly baseUrl: string;
 
   constructor(private configService: ConfigService) {
-    this.uploadDir = this.configService.get<string>('UPLOAD_DIR', '/var/www/uploads');
-    this.baseUrl = this.configService.get<string>('BASE_URL', 'http://64.226.115.148');
-    
+    this.uploadDir = this.configService.get<string>(
+      "UPLOAD_DIR",
+      "/var/www/uploads",
+    );
+    this.baseUrl = this.configService.get<string>(
+      "BASE_URL",
+      "http://64.226.115.148",
+    );
+
     // Create upload directories
     this.ensureDirectories();
     this.logger.log(`📁 Upload service initialized: ${this.uploadDir}`);
   }
 
   private ensureDirectories() {
-    const dirs = ['avatars', 'rooms', 'messages', 'gifts'];
+    const dirs = ["avatars", "rooms", "messages", "gifts"];
     for (const dir of dirs) {
       const fullPath = path.join(this.uploadDir, dir);
       if (!fs.existsSync(fullPath)) {
@@ -37,16 +43,16 @@ export class UploadService {
 
   async uploadImage(
     file: Express.Multer.File,
-    folder: string = 'general',
+    folder: string = "general",
   ): Promise<UploadResult> {
     const filename = `${uuidv4()}${path.extname(file.originalname)}`;
     const filePath = path.join(this.uploadDir, folder, filename);
-    
+
     await fs.promises.writeFile(filePath, file.buffer);
-    
+
     const url = `${this.baseUrl}/uploads/${folder}/${filename}`;
     this.logger.log(`📤 Image uploaded: ${url}`);
-    
+
     return {
       url,
       filename,
@@ -54,26 +60,31 @@ export class UploadService {
     };
   }
 
-  async uploadAvatar(file: Express.Multer.File, userId: string): Promise<UploadResult> {
-    const ext = path.extname(file.originalname) || '.jpg';
+  async uploadAvatar(
+    file: Express.Multer.File,
+    userId: string,
+  ): Promise<UploadResult> {
+    const ext = path.extname(file.originalname) || ".jpg";
     const filename = `avatar_${userId}${ext}`;
-    const filePath = path.join(this.uploadDir, 'avatars', filename);
-    
+    const filePath = path.join(this.uploadDir, "avatars", filename);
+
     // Delete old avatar if exists
     try {
-      const files = await fs.promises.readdir(path.join(this.uploadDir, 'avatars'));
+      const files = await fs.promises.readdir(
+        path.join(this.uploadDir, "avatars"),
+      );
       for (const f of files) {
         if (f.startsWith(`avatar_${userId}`)) {
-          await fs.promises.unlink(path.join(this.uploadDir, 'avatars', f));
+          await fs.promises.unlink(path.join(this.uploadDir, "avatars", f));
         }
       }
     } catch (e) {}
-    
+
     await fs.promises.writeFile(filePath, file.buffer);
-    
+
     const url = `${this.baseUrl}/uploads/avatars/${filename}`;
     this.logger.log(`📤 Avatar uploaded: ${url}`);
-    
+
     return {
       url,
       filename,
@@ -81,16 +92,19 @@ export class UploadService {
     };
   }
 
-  async uploadRoomImage(file: Express.Multer.File, roomId: string): Promise<UploadResult> {
-    const ext = path.extname(file.originalname) || '.jpg';
+  async uploadRoomImage(
+    file: Express.Multer.File,
+    roomId: string,
+  ): Promise<UploadResult> {
+    const ext = path.extname(file.originalname) || ".jpg";
     const filename = `room_${roomId}${ext}`;
-    const filePath = path.join(this.uploadDir, 'rooms', filename);
-    
+    const filePath = path.join(this.uploadDir, "rooms", filename);
+
     await fs.promises.writeFile(filePath, file.buffer);
-    
+
     const url = `${this.baseUrl}/uploads/rooms/${filename}`;
     this.logger.log(`📤 Room image uploaded: ${url}`);
-    
+
     return {
       url,
       filename,

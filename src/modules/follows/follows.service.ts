@@ -10,9 +10,9 @@ import {
   Logger,
   Inject,
   forwardRef,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { NotificationsService } from '../notifications/notifications.service';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { NotificationsService } from "../notifications/notifications.service";
 
 @Injectable()
 export class FollowsService {
@@ -31,7 +31,7 @@ export class FollowsService {
   async follow(followerId: string, followingId: string) {
     // Can't follow yourself
     if (followerId === followingId) {
-      throw new BadRequestException('لا يمكنك متابعة نفسك');
+      throw new BadRequestException("لا يمكنك متابعة نفسك");
     }
 
     // Check if user exists
@@ -41,7 +41,7 @@ export class FollowsService {
     });
 
     if (!targetUser) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
     // Check if already following
@@ -52,7 +52,7 @@ export class FollowsService {
     });
 
     if (existing) {
-      throw new ConflictException('أنت تتابع هذا المستخدم بالفعل');
+      throw new ConflictException("أنت تتابع هذا المستخدم بالفعل");
     }
 
     // Create follow
@@ -74,14 +74,14 @@ export class FollowsService {
     // Send notification
     await this.notificationsService.notifyNewFollower(
       followingId,
-      follower?.displayName || 'مستخدم',
+      follower?.displayName || "مستخدم",
       followerId,
     );
 
     this.logger.log(`User ${followerId} followed ${followingId}`);
 
     return {
-      message: 'تمت المتابعة بنجاح',
+      message: "تمت المتابعة بنجاح",
       following: follow.following,
     };
   }
@@ -98,7 +98,7 @@ export class FollowsService {
     });
 
     if (!existing) {
-      throw new NotFoundException('أنت لا تتابع هذا المستخدم');
+      throw new NotFoundException("أنت لا تتابع هذا المستخدم");
     }
 
     await this.prisma.follow.delete({
@@ -109,7 +109,7 @@ export class FollowsService {
 
     this.logger.log(`User ${followerId} unfollowed ${followingId}`);
 
-    return { message: 'تم إلغاء المتابعة' };
+    return { message: "تم إلغاء المتابعة" };
   }
 
   // ================================
@@ -145,7 +145,7 @@ export class FollowsService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -153,7 +153,7 @@ export class FollowsService {
     ]);
 
     return {
-      data: followers.map(f => f.follower),
+      data: followers.map((f) => f.follower),
       meta: {
         total,
         page,
@@ -183,7 +183,7 @@ export class FollowsService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -191,7 +191,7 @@ export class FollowsService {
     ]);
 
     return {
-      data: following.map(f => f.following),
+      data: following.map((f) => f.following),
       meta: {
         total,
         page,

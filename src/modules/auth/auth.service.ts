@@ -5,28 +5,28 @@ import {
   BadRequestException,
   Logger,
   InternalServerErrorException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
-import * as argon2 from 'argon2';
-import { v4 as uuidv4 } from 'uuid';
-import { OAuth2Client } from 'google-auth-library';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { ConfigService } from "@nestjs/config";
+import * as argon2 from "argon2";
+import { v4 as uuidv4 } from "uuid";
+import { OAuth2Client } from "google-auth-library";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
 import {
   RegisterDto,
   LoginDto,
   GoogleLoginDto,
   RefreshTokenDto,
   ChangePasswordDto,
-} from './dto/auth.dto';
-import { AuthProvider, UserStatus, Prisma } from '@prisma/client';
+} from "./dto/auth.dto";
+import { AuthProvider, UserStatus, Prisma } from "@prisma/client";
 
 interface JwtPayload {
   sub: string;
   email: string;
   role: string;
-  type: 'access' | 'refresh';
+  type: "access" | "refresh";
 }
 
 export interface TokenPair {
@@ -62,7 +62,7 @@ export class AuthService {
   ) {
     // Initialize Google OAuth client
     this.googleClient = new OAuth2Client(
-      this.configService.get<string>('GOOGLE_CLIENT_ID'),
+      this.configService.get<string>("GOOGLE_CLIENT_ID"),
     );
   }
 
@@ -74,14 +74,14 @@ export class AuthService {
     try {
       // Ensure database connection is alive
       await this.prisma.ensureConnection();
-      
+
       // Check if email already exists
       const existingEmail = await this.prisma.user.findUnique({
         where: { email: dto.email.toLowerCase() },
       });
 
       if (existingEmail) {
-        throw new ConflictException('البريد الإلكتروني مسجل بالفعل');
+        throw new ConflictException("البريد الإلكتروني مسجل بالفعل");
       }
 
       // Check if username already exists
@@ -90,7 +90,7 @@ export class AuthService {
       });
 
       if (existingUsername) {
-        throw new ConflictException('اسم المستخدم موجود بالفعل');
+        throw new ConflictException("اسم المستخدم موجود بالفعل");
       }
 
       // Hash password with argon2
@@ -102,31 +102,33 @@ export class AuthService {
       });
 
       // Create user with transaction
-      const user = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        // Create user (numericId يتم توليده تلقائياً بواسطة PostgreSQL)
-        const newUser = await tx.user.create({
-          data: {
-            email: dto.email.toLowerCase(),
-            passwordHash,
-            username: dto.username.toLowerCase(),
-            displayName: dto.displayName,
-            authProvider: AuthProvider.EMAIL,
-            lastLoginAt: new Date(),
-            lastLoginIp: ipAddress,
-          },
-        });
+      const user = await this.prisma.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          // Create user (numericId يتم توليده تلقائياً بواسطة PostgreSQL)
+          const newUser = await tx.user.create({
+            data: {
+              email: dto.email.toLowerCase(),
+              passwordHash,
+              username: dto.username.toLowerCase(),
+              displayName: dto.displayName,
+              authProvider: AuthProvider.EMAIL,
+              lastLoginAt: new Date(),
+              lastLoginIp: ipAddress,
+            },
+          });
 
-        // Create wallet for user
-        await tx.wallet.create({
-          data: {
-            userId: newUser.id,
-            balance: 0,
-            diamonds: 0,
-          },
-        });
+          // Create wallet for user
+          await tx.wallet.create({
+            data: {
+              userId: newUser.id,
+              balance: 0,
+              diamonds: 0,
+            },
+          });
 
-        return newUser;
-      });
+          return newUser;
+        },
+      );
 
       // Generate tokens
       const tokens = await this.generateTokens(user, ipAddress);
@@ -151,26 +153,31 @@ export class AuthService {
       if (error instanceof ConflictException) {
         throw error;
       }
-      
+
       // Handle unique constraint violation (P2002)
-      if (error.code === 'P2002') {
+      if (error.code === "P2002") {
         const target = error.meta?.target?.[0];
-        if (target === 'email') {
-          throw new ConflictException('البريد الإلكتروني مسجل بالفعل');
-        } else if (target === 'username') {
-          throw new ConflictException('اسم المستخدم موجود بالفعل');
+        if (target === "email") {
+          throw new ConflictException("البريد الإلكتروني مسجل بالفعل");
+        } else if (target === "username") {
+          throw new ConflictException("اسم المستخدم موجود بالفعل");
         }
-        throw new ConflictException('البيانات موجودة بالفعل');
+        throw new ConflictException("البيانات موجودة بالفعل");
       }
-      
+
       // Handle database connection errors
-      if (error.code === 'P1001' || error.message?.includes('Can\'t reach database server')) {
-        this.logger.error('Database connection lost during registration');
-        throw new InternalServerErrorException('خطأ في الاتصال بقاعدة البيانات. يرجى المحاولة مرة أخرى');
+      if (
+        error.code === "P1001" ||
+        error.message?.includes("Can't reach database server")
+      ) {
+        this.logger.error("Database connection lost during registration");
+        throw new InternalServerErrorException(
+          "خطأ في الاتصال بقاعدة البيانات. يرجى المحاولة مرة أخرى",
+        );
       }
-      
+
       this.logger.error(`Registration error: ${error.message}`);
-      throw new InternalServerErrorException('حدث خطأ أثناء إنشاء الحساب');
+      throw new InternalServerErrorException("حدث خطأ أثناء إنشاء الحساب");
     }
   }
 
@@ -182,34 +189,39 @@ export class AuthService {
     try {
       // Ensure database connection is alive
       await this.prisma.ensureConnection();
-      
+
       // Find user by email
       const user = await this.prisma.user.findUnique({
         where: { email: dto.email.toLowerCase() },
       });
 
       if (!user) {
-        throw new UnauthorizedException('بيانات الدخول غير صحيحة');
+        throw new UnauthorizedException("بيانات الدخول غير صحيحة");
       }
 
       // Check user status
       if (user.status === UserStatus.BANNED) {
-        throw new UnauthorizedException('تم حظر هذا الحساب');
+        throw new UnauthorizedException("تم حظر هذا الحساب");
       }
 
       if (user.status === UserStatus.SUSPENDED) {
-        throw new UnauthorizedException('هذا الحساب معلق مؤقتاً');
+        throw new UnauthorizedException("هذا الحساب معلق مؤقتاً");
       }
 
       // Check if user has password (might be Google-only user)
       if (!user.passwordHash) {
-        throw new UnauthorizedException('هذا الحساب مسجل عبر Google. يرجى تسجيل الدخول باستخدام Google');
+        throw new UnauthorizedException(
+          "هذا الحساب مسجل عبر Google. يرجى تسجيل الدخول باستخدام Google",
+        );
       }
 
       // Verify password
-      const isPasswordValid = await argon2.verify(user.passwordHash, dto.password);
+      const isPasswordValid = await argon2.verify(
+        user.passwordHash,
+        dto.password,
+      );
       if (!isPasswordValid) {
-        throw new UnauthorizedException('بيانات الدخول غير صحيحة');
+        throw new UnauthorizedException("بيانات الدخول غير صحيحة");
       }
 
       // Update last login
@@ -244,15 +256,20 @@ export class AuthService {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      
+
       // Handle database connection errors
-      if (error.code === 'P1001' || error.message?.includes('Can\'t reach database server')) {
-        this.logger.error('Database connection lost during login');
-        throw new InternalServerErrorException('خطأ في الاتصال بقاعدة البيانات. يرجى المحاولة مرة أخرى');
+      if (
+        error.code === "P1001" ||
+        error.message?.includes("Can't reach database server")
+      ) {
+        this.logger.error("Database connection lost during login");
+        throw new InternalServerErrorException(
+          "خطأ في الاتصال بقاعدة البيانات. يرجى المحاولة مرة أخرى",
+        );
       }
-      
+
       this.logger.error(`Login error: ${error.message}`);
-      throw new InternalServerErrorException('حدث خطأ أثناء تسجيل الدخول');
+      throw new InternalServerErrorException("حدث خطأ أثناء تسجيل الدخول");
     }
   }
 
@@ -260,22 +277,27 @@ export class AuthService {
   // GOOGLE LOGIN
   // ================================
 
-  async googleLogin(dto: GoogleLoginDto, ipAddress?: string): Promise<AuthResponse> {
+  async googleLogin(
+    dto: GoogleLoginDto,
+    ipAddress?: string,
+  ): Promise<AuthResponse> {
     // Verify Google ID token
     let googlePayload;
     try {
       const ticket = await this.googleClient.verifyIdToken({
         idToken: dto.idToken,
-        audience: this.configService.get<string>('GOOGLE_CLIENT_ID'),
+        audience: this.configService.get<string>("GOOGLE_CLIENT_ID"),
       });
       googlePayload = ticket.getPayload();
     } catch (error) {
-      this.logger.error('Google token verification failed', error);
-      throw new UnauthorizedException('Google token غير صالح');
+      this.logger.error("Google token verification failed", error);
+      throw new UnauthorizedException("Google token غير صالح");
     }
 
     if (!googlePayload || !googlePayload.email) {
-      throw new UnauthorizedException('لم يتم الحصول على البريد الإلكتروني من Google');
+      throw new UnauthorizedException(
+        "لم يتم الحصول على البريد الإلكتروني من Google",
+      );
     }
 
     const { email, sub: googleId, name, picture } = googlePayload;
@@ -304,46 +326,50 @@ export class AuthService {
         this.logger.log(`Linked Google account to existing user: ${email}`);
       } else {
         // Create new user
-        const username = await this.generateUniqueUsername(name || email.split('@')[0]);
-        
-        user = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          // Create user (numericId يتم توليده تلقائياً)
-          const newUser = await tx.user.create({
-            data: {
-              email: email.toLowerCase(),
-              googleId,
-              username,
-              displayName: name || username,
-              avatar: picture,
-              authProvider: AuthProvider.GOOGLE,
-              emailVerified: true,
-              lastLoginAt: new Date(),
-              lastLoginIp: ipAddress,
-            },
-          });
+        const username = await this.generateUniqueUsername(
+          name || email.split("@")[0],
+        );
 
-          // Create wallet
-          await tx.wallet.create({
-            data: {
-              userId: newUser.id,
-              balance: 0,
-              diamonds: 0,
-            },
-          });
+        user = await this.prisma.$transaction(
+          async (tx: Prisma.TransactionClient) => {
+            // Create user (numericId يتم توليده تلقائياً)
+            const newUser = await tx.user.create({
+              data: {
+                email: email.toLowerCase(),
+                googleId,
+                username,
+                displayName: name || username,
+                avatar: picture,
+                authProvider: AuthProvider.GOOGLE,
+                emailVerified: true,
+                lastLoginAt: new Date(),
+                lastLoginIp: ipAddress,
+              },
+            });
 
-          return newUser;
-        });
-        
+            // Create wallet
+            await tx.wallet.create({
+              data: {
+                userId: newUser.id,
+                balance: 0,
+                diamonds: 0,
+              },
+            });
+
+            return newUser;
+          },
+        );
+
         this.logger.log(`New Google user registered: ${email}`);
       }
     } else {
       // Check user status
       if (user.status === UserStatus.BANNED) {
-        throw new UnauthorizedException('تم حظر هذا الحساب');
+        throw new UnauthorizedException("تم حظر هذا الحساب");
       }
 
       if (user.status === UserStatus.SUSPENDED) {
-        throw new UnauthorizedException('هذا الحساب معلق مؤقتاً');
+        throw new UnauthorizedException("هذا الحساب معلق مؤقتاً");
       }
 
       // Update last login
@@ -379,7 +405,10 @@ export class AuthService {
   // REFRESH TOKEN
   // ================================
 
-  async refreshTokens(dto: RefreshTokenDto, ipAddress?: string): Promise<TokenPair> {
+  async refreshTokens(
+    dto: RefreshTokenDto,
+    ipAddress?: string,
+  ): Promise<TokenPair> {
     // Find refresh token in database
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { token: dto.refreshToken },
@@ -387,22 +416,24 @@ export class AuthService {
     });
 
     if (!storedToken) {
-      throw new UnauthorizedException('Refresh token غير صالح');
+      throw new UnauthorizedException("Refresh token غير صالح");
     }
 
     if (storedToken.revokedAt) {
       // Token was revoked - possible security breach, revoke all tokens
       await this.revokeAllUserTokens(storedToken.userId);
-      throw new UnauthorizedException('تم اكتشاف محاولة استخدام token ملغي. تم تسجيل الخروج من جميع الأجهزة');
+      throw new UnauthorizedException(
+        "تم اكتشاف محاولة استخدام token ملغي. تم تسجيل الخروج من جميع الأجهزة",
+      );
     }
 
     if (storedToken.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh token منتهي الصلاحية');
+      throw new UnauthorizedException("Refresh token منتهي الصلاحية");
     }
 
     // Check user status
     if (storedToken.user.status === UserStatus.BANNED) {
-      throw new UnauthorizedException('تم حظر هذا الحساب');
+      throw new UnauthorizedException("تم حظر هذا الحساب");
     }
 
     // Revoke old token
@@ -421,7 +452,11 @@ export class AuthService {
   // LOGOUT
   // ================================
 
-  async logout(userId: string, refreshToken?: string, logoutAll?: boolean): Promise<void> {
+  async logout(
+    userId: string,
+    refreshToken?: string,
+    logoutAll?: boolean,
+  ): Promise<void> {
     if (logoutAll) {
       await this.revokeAllUserTokens(userId);
       this.logger.log(`User ${userId} logged out from all devices`);
@@ -450,13 +485,13 @@ export class AuthService {
     });
 
     if (!user || !user.passwordHash) {
-      throw new BadRequestException('لا يمكن تغيير كلمة المرور لهذا الحساب');
+      throw new BadRequestException("لا يمكن تغيير كلمة المرور لهذا الحساب");
     }
 
     // Verify current password
     const isValid = await argon2.verify(user.passwordHash, dto.currentPassword);
     if (!isValid) {
-      throw new UnauthorizedException('كلمة المرور الحالية غير صحيحة');
+      throw new UnauthorizedException("كلمة المرور الحالية غير صحيحة");
     }
 
     // Hash new password
@@ -495,23 +530,26 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
-      type: 'access',
+      type: "access",
     };
 
     const refreshPayload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
-      type: 'refresh',
+      type: "refresh",
     };
 
     const accessToken = this.jwtService.sign(accessPayload, {
-      secret: this.configService.get<string>('JWT_SECRET'),
-      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN', '15m'),
+      secret: this.configService.get<string>("JWT_SECRET"),
+      expiresIn: this.configService.get<string>("JWT_EXPIRES_IN", "15m"),
     });
 
     const refreshTokenValue = uuidv4();
-    const refreshExpiresIn = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d');
+    const refreshExpiresIn = this.configService.get<string>(
+      "JWT_REFRESH_EXPIRES_IN",
+      "7d",
+    );
     const refreshExpiresMs = this.parseExpiry(refreshExpiresIn);
 
     // Store refresh token in database
@@ -543,18 +581,20 @@ export class AuthService {
     // Clean base name
     let username = baseName
       .toLowerCase()
-      .replace(/[^a-z0-9_]/g, '')
+      .replace(/[^a-z0-9_]/g, "")
       .substring(0, 20);
 
     if (username.length < 3) {
-      username = 'user';
+      username = "user";
     }
 
     // Check if unique
     let finalUsername = username;
     let counter = 1;
 
-    while (await this.prisma.user.findUnique({ where: { username: finalUsername } })) {
+    while (
+      await this.prisma.user.findUnique({ where: { username: finalUsername } })
+    ) {
       finalUsername = `${username}${counter}`;
       counter++;
     }
@@ -570,13 +610,13 @@ export class AuthService {
     const unit = match[2];
 
     switch (unit) {
-      case 's':
+      case "s":
         return value * 1000;
-      case 'm':
+      case "m":
         return value * 60 * 1000;
-      case 'h':
+      case "h":
         return value * 60 * 60 * 1000;
-      case 'd':
+      case "d":
         return value * 24 * 60 * 60 * 1000;
       default:
         return 7 * 24 * 60 * 60 * 1000;

@@ -1,6 +1,6 @@
-import { IsInt, IsOptional, IsString, Min, Max, IsEnum } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { TransactionType } from '@prisma/client';
+import { IsInt, IsOptional, IsString, Min, Max, IsEnum } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { TransactionType } from "@prisma/client";
 
 export class DepositDto {
   @ApiProperty({ example: 1000 })
@@ -38,28 +38,31 @@ export class WithdrawDto {
 }
 
 export class DeductDto {
-  @ApiProperty({ example: 100, description: 'المبلغ المراد خصمه' })
+  @ApiProperty({ example: 100, description: "المبلغ المراد خصمه" })
   @IsInt()
   @Min(1)
   amount: number;
 
-  @ApiPropertyOptional({ example: 'coins', description: 'نوع العملة: coins أو diamonds' })
+  @ApiPropertyOptional({
+    example: "coins",
+    description: "نوع العملة: coins أو diamonds",
+  })
   @IsOptional()
   @IsString()
   type?: string;
 
-  @ApiPropertyOptional({ example: 'شراء شارة', description: 'سبب الخصم' })
+  @ApiPropertyOptional({ example: "شراء شارة", description: "سبب الخصم" })
   @IsOptional()
   @IsString()
   reason?: string;
 }
 
 export class AdminAdjustBalanceDto {
-  @ApiProperty({ example: 100, description: 'مبلغ موجب للإضافة، سالب للخصم' })
+  @ApiProperty({ example: 100, description: "مبلغ موجب للإضافة، سالب للخصم" })
   @IsInt()
   amount: number;
 
-  @ApiProperty({ example: 'مكافأة خاصة' })
+  @ApiProperty({ example: "مكافأة خاصة" })
   @IsString()
   reason: string;
 }

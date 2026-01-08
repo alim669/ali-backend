@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as admin from "firebase-admin";
 
 export interface PushNotificationPayload {
   title: string;
@@ -19,9 +19,9 @@ export class FirebasePushService {
   }
 
   private initializeFirebase() {
-    const projectId = this.configService.get<string>('FIREBASE_PROJECT_ID');
-    const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
-    const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
+    const projectId = this.configService.get<string>("FIREBASE_PROJECT_ID");
+    const clientEmail = this.configService.get<string>("FIREBASE_CLIENT_EMAIL");
+    const privateKey = this.configService.get<string>("FIREBASE_PRIVATE_KEY");
 
     if (projectId && clientEmail && privateKey) {
       try {
@@ -29,21 +29,24 @@ export class FirebasePushService {
           credential: admin.credential.cert({
             projectId,
             clientEmail,
-            privateKey: privateKey.replace(/\\n/g, '\n'),
+            privateKey: privateKey.replace(/\\n/g, "\n"),
           }),
         });
-        this.logger.log('🔔 Firebase Push initialized');
+        this.logger.log("🔔 Firebase Push initialized");
       } catch (error) {
         this.logger.error(`Firebase init failed: ${error.message}`);
       }
     } else {
-      this.logger.warn('⚠️ Firebase Push not configured');
+      this.logger.warn("⚠️ Firebase Push not configured");
     }
   }
 
-  async sendToDevice(token: string, payload: PushNotificationPayload): Promise<boolean> {
+  async sendToDevice(
+    token: string,
+    payload: PushNotificationPayload,
+  ): Promise<boolean> {
     if (!this.app) {
-      this.logger.warn('Firebase not initialized');
+      this.logger.warn("Firebase not initialized");
       return false;
     }
 
@@ -57,16 +60,16 @@ export class FirebasePushService {
         },
         data: payload.data,
         android: {
-          priority: 'high',
+          priority: "high",
           notification: {
-            sound: 'default',
-            clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+            sound: "default",
+            clickAction: "FLUTTER_NOTIFICATION_CLICK",
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: 'default',
+              sound: "default",
               badge: 1,
             },
           },
@@ -100,7 +103,7 @@ export class FirebasePushService {
         },
         data: payload.data,
         android: {
-          priority: 'high',
+          priority: "high",
         },
       };
 
@@ -118,7 +121,10 @@ export class FirebasePushService {
     }
   }
 
-  async sendToTopic(topic: string, payload: PushNotificationPayload): Promise<boolean> {
+  async sendToTopic(
+    topic: string,
+    payload: PushNotificationPayload,
+  ): Promise<boolean> {
     if (!this.app) {
       return false;
     }

@@ -4,22 +4,23 @@ import {
   IsEnum,
   IsBoolean,
   IsInt,
+  IsObject,
   MinLength,
   MaxLength,
   Min,
   Max,
-} from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { RoomType, MemberRole } from '@prisma/client';
+} from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { RoomType, MemberRole } from "@prisma/client";
 
 export class CreateRoomDto {
-  @ApiProperty({ example: 'غرفة الأصدقاء' })
+  @ApiProperty({ example: "غرفة الأصدقاء" })
   @IsString()
   @MinLength(3)
   @MaxLength(50)
   name: string;
 
-  @ApiPropertyOptional({ example: 'غرفة للدردشة والمرح' })
+  @ApiPropertyOptional({ example: "غرفة للدردشة والمرح" })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -47,6 +48,11 @@ export class CreateRoomDto {
   @IsString()
   @MinLength(4)
   password?: string;
+
+  @ApiPropertyOptional({ description: 'إعدادات إضافية للغرفة (مثل category)' })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, any>;
 }
 
 export class UpdateRoomDto {
@@ -74,6 +80,11 @@ export class UpdateRoomDto {
   @Min(2)
   @Max(1000)
   maxMembers?: number;
+
+  @ApiPropertyOptional({ description: 'إعدادات إضافية للغرفة' })
+  @IsOptional()
+  @IsObject()
+  settings?: Record<string, any>;
 }
 
 export class JoinRoomDto {
@@ -121,12 +132,12 @@ export class RoomQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sortBy?: string = 'currentMembers';
+  sortBy?: string = "currentMembers";
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sortOrder?: 'asc' | 'desc' = 'desc';
+  sortOrder?: "asc" | "desc" = "desc";
 }
 
 export class KickMemberDto {

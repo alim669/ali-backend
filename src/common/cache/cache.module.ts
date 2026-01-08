@@ -3,9 +3,9 @@
  * وحدة التخزين المؤقت
  */
 
-import { Global, Module } from '@nestjs/common';
-import { CacheService } from './cache.service';
-import { RedisModule } from '../redis/redis.module';
+import { Global, Module } from "@nestjs/common";
+import { CacheService } from "./cache.service";
+import { RedisModule } from "../redis/redis.module";
 
 @Global()
 @Module({

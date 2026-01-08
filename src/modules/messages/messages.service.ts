@@ -3,11 +3,11 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { SendMessageDto, MessageQueryDto } from './dto/messages.dto';
-import { MessageType, MemberRole } from '@prisma/client';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { SendMessageDto, MessageQueryDto } from "./dto/messages.dto";
+import { MessageType, MemberRole } from "@prisma/client";
 
 @Injectable()
 export class MessagesService {
@@ -22,20 +22,20 @@ export class MessagesService {
   // SEND MESSAGE
   // ================================
 
-  async send(roomId: string, userId: string, dto: SendMessageDto) {
+  async send(roomId: string, userId: string, dto: SendMessageDto): Promise<any> {
     // Check room membership
     const membership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId } },
     });
 
     if (!membership || membership.leftAt || membership.isBanned) {
-      throw new ForbiddenException('أنت لست عضواً في هذه الغرفة');
+      throw new ForbiddenException("أنت لست عضواً في هذه الغرفة");
     }
 
     // Check if muted
     if (membership.isMuted) {
       if (membership.mutedUntil && membership.mutedUntil > new Date()) {
-        throw new ForbiddenException('أنت كتوم في هذه الغرفة');
+        throw new ForbiddenException("أنت كتوم في هذه الغرفة");
       }
       // Unmute if time expired
       await this.prisma.roomMember.update({
@@ -66,7 +66,7 @@ export class MessagesService {
 
     // Publish to Redis for WebSocket
     await this.redis.publish(`room:${roomId}:messages`, {
-      type: 'new_message',
+      type: "new_message",
       data: message,
     });
 
@@ -80,14 +80,14 @@ export class MessagesService {
   // GET ROOM MESSAGES
   // ================================
 
-  async getMessages(roomId: string, userId: string, query: MessageQueryDto) {
+  async getMessages(roomId: string, userId: string, query: MessageQueryDto): Promise<any> {
     // Verify user can access room
     const membership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId } },
     });
 
     if (!membership) {
-      throw new ForbiddenException('ليس لديك صلاحية الوصول لهذه الغرفة');
+      throw new ForbiddenException("ليس لديك صلاحية الوصول لهذه الغرفة");
     }
 
     const { page = 1, limit = 50, before, after, type } = query;
@@ -136,7 +136,7 @@ export class MessagesService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -174,17 +174,20 @@ export class MessagesService {
     });
 
     if (!message) {
-      throw new NotFoundException('الرسالة غير موجودة');
+      throw new NotFoundException("الرسالة غير موجودة");
     }
 
     // Check permission: sender or room moderator+
     const membership = message.room.members[0];
     const canDelete =
       message.senderId === userId ||
-      (membership && ([MemberRole.OWNER, MemberRole.ADMIN, MemberRole.MODERATOR] as string[]).includes(membership.role));
+      (membership &&
+        (
+          [MemberRole.OWNER, MemberRole.ADMIN, MemberRole.MODERATOR] as string[]
+        ).includes(membership.role));
 
     if (!canDelete) {
-      throw new ForbiddenException('ليس لديك صلاحية حذف هذه الرسالة');
+      throw new ForbiddenException("ليس لديك صلاحية حذف هذه الرسالة");
     }
 
     await this.prisma.message.update({
@@ -198,11 +201,11 @@ export class MessagesService {
 
     // Notify via WebSocket
     await this.redis.publish(`room:${message.roomId}:messages`, {
-      type: 'message_deleted',
+      type: "message_deleted",
       data: { messageId, deletedBy: userId },
     });
 
-    return { message: 'تم حذف الرسالة' };
+    return { message: "تم حذف الرسالة" };
   }
 
   // ================================
@@ -214,7 +217,7 @@ export class MessagesService {
 
     // Publish typing event
     await this.redis.publish(`room:${roomId}:typing`, {
-      type: 'typing',
+      type: "typing",
       userId,
     });
   }
@@ -223,7 +226,7 @@ export class MessagesService {
     await this.redis.removeTyping(roomId, userId);
 
     await this.redis.publish(`room:${roomId}:typing`, {
-      type: 'stop_typing',
+      type: "stop_typing",
       userId,
     });
   }
@@ -236,14 +239,14 @@ export class MessagesService {
   // CREATE SYSTEM MESSAGE
   // ================================
 
-  async createSystemMessage(roomId: string, content: string) {
+  async createSystemMessage(roomId: string, content: string): Promise<any> {
     // Get room owner as sender for system messages
     const room = await this.prisma.room.findUnique({
       where: { id: roomId },
     });
 
     if (!room) {
-      throw new NotFoundException('الغرفة غير موجودة');
+      throw new NotFoundException("الغرفة غير موجودة");
     }
 
     const message = await this.prisma.message.create({
@@ -256,7 +259,7 @@ export class MessagesService {
     });
 
     await this.redis.publish(`room:${roomId}:messages`, {
-      type: 'system_message',
+      type: "system_message",
       data: message,
     });
 
@@ -272,7 +275,7 @@ export class MessagesService {
     senderId: string,
     giftSendId: string,
     content: string,
-  ) {
+  ): Promise<any> {
     const message = await this.prisma.message.create({
       data: {
         roomId,
@@ -315,7 +318,7 @@ export class MessagesService {
     });
 
     await this.redis.publish(`room:${roomId}:messages`, {
-      type: 'gift_message',
+      type: "gift_message",
       data: message,
     });
 

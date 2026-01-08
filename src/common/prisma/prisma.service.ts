@@ -1,8 +1,16 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from "@nestjs/common";
+import { PrismaClient } from "@prisma/client";
 
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(PrismaService.name);
   private isConnected = false;
   private reconnectAttempts = 0;
@@ -12,10 +20,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   constructor() {
     super({
       log: [
-        { emit: 'event', level: 'query' },
-        { emit: 'stdout', level: 'info' },
-        { emit: 'stdout', level: 'warn' },
-        { emit: 'stdout', level: 'error' },
+        { emit: "event", level: "query" },
+        { emit: "stdout", level: "info" },
+        { emit: "stdout", level: "warn" },
+        { emit: "stdout", level: "error" },
       ],
       datasources: {
         db: {
@@ -29,9 +37,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     await this.connectWithRetry();
 
     // Log slow queries in development
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV !== "production") {
       // @ts-ignore
-      this.$on('query', (e: any) => {
+      this.$on("query", (e: any) => {
         if (e.duration > 100) {
           this.logger.warn(`Slow query (${e.duration}ms): ${e.query}`);
         }
@@ -45,25 +53,32 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   private async connectWithRetry(): Promise<void> {
     while (this.reconnectAttempts < this.maxReconnectAttempts) {
       try {
-        this.logger.log(`Connecting to PostgreSQL... (attempt ${this.reconnectAttempts + 1})`);
+        this.logger.log(
+          `Connecting to PostgreSQL... (attempt ${this.reconnectAttempts + 1})`,
+        );
         await this.$connect();
         this.isConnected = true;
         this.reconnectAttempts = 0;
-        this.logger.log('✅ Connected to PostgreSQL');
+        this.logger.log("✅ Connected to PostgreSQL");
         return;
       } catch (error) {
         this.reconnectAttempts++;
         this.isConnected = false;
-        this.logger.error(`Failed to connect (attempt ${this.reconnectAttempts}): ${error.message}`);
-        
+        this.logger.error(
+          `Failed to connect (attempt ${this.reconnectAttempts}): ${error.message}`,
+        );
+
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-          throw new Error('Max reconnection attempts reached');
+          throw new Error("Max reconnection attempts reached");
         }
-        
+
         // Wait before retry (exponential backoff: 1s, 2s, 4s, 8s, 16s)
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+        const delay = Math.min(
+          1000 * Math.pow(2, this.reconnectAttempts - 1),
+          16000,
+        );
         this.logger.log(`Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
@@ -80,12 +95,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         await this.$queryRaw`SELECT 1`;
         this.isConnected = true;
       } catch (error) {
-        this.logger.warn('Keep-alive ping failed, attempting reconnect...');
+        this.logger.warn("Keep-alive ping failed, attempting reconnect...");
         this.isConnected = false;
         try {
           await this.$connect();
           this.isConnected = true;
-          this.logger.log('✅ Reconnected to PostgreSQL');
+          this.logger.log("✅ Reconnected to PostgreSQL");
         } catch (reconnectError) {
           this.logger.error(`Reconnect failed: ${reconnectError.message}`);
         }
@@ -95,7 +110,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   async ensureConnection(): Promise<void> {
     if (!this.isConnected) {
-      this.logger.log('Connection lost, reconnecting...');
+      this.logger.log("Connection lost, reconnecting...");
       await this.connectWithRetry();
     }
   }
@@ -107,20 +122,21 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
       this.keepAliveInterval = null;
     }
 
-    this.logger.log('Disconnecting from PostgreSQL...');
+    this.logger.log("Disconnecting from PostgreSQL...");
     await this.$disconnect();
     this.isConnected = false;
-    this.logger.log('Disconnected from PostgreSQL');
+    this.logger.log("Disconnected from PostgreSQL");
   }
 
   // Clean database for testing
   async cleanDatabase() {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('Cannot clean database in production!');
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Cannot clean database in production!");
     }
 
     const models = Reflect.ownKeys(this).filter(
-      (key) => typeof key === 'string' && !key.startsWith('_') && !key.startsWith('$'),
+      (key) =>
+        typeof key === "string" && !key.startsWith("_") && !key.startsWith("$"),
     );
 
     return Promise.all(

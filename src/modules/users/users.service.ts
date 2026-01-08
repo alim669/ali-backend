@@ -4,17 +4,17 @@ import {
   ConflictException,
   ForbiddenException,
   Logger,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { CacheService, CACHE_TTL } from '../../common/cache/cache.service';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { CacheService, CACHE_TTL } from "../../common/cache/cache.service";
 import {
   UpdateProfileDto,
   UpdateUsernameDto,
   AdminUpdateUserDto,
   UserQueryDto,
-} from './dto/users.dto';
-import { UserStatus, UserRole } from '@prisma/client';
+} from "./dto/users.dto";
+import { UserStatus, UserRole } from "@prisma/client";
 
 @Injectable()
 export class UsersService {
@@ -31,13 +31,25 @@ export class UsersService {
   // ================================
 
   async findById(id: string) {
-    // Try cache first
-    const cacheKey = this.cache.getUserKey(id);
-    const cached = await this.cache.getCachedUser<any>(id);
-    
+    // Try cache first (with graceful fallback)
+    let cached: any = null;
+    try {
+      cached = await this.cache.getCachedUser<any>(id);
+    } catch (cacheError) {
+      this.logger.warn(`Cache error for user ${id}: ${cacheError.message}`);
+      // Continue without cache
+    }
+
     if (cached) {
-      // Add online status (always fresh)
-      const isOnline = await this.redis.isUserOnline(id);
+      // Add online status (always fresh, with fallback)
+      let isOnline = false;
+      try {
+        isOnline = await this.redis.isUserOnline(id);
+      } catch (redisError) {
+        this.logger.warn(
+          `Redis error checking online status: ${redisError.message}`,
+        );
+      }
       return { ...cached, isOnline };
     }
 
@@ -65,19 +77,32 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
-    // Cache the user data
-    await this.cache.cacheUser(id, user, CACHE_TTL.USER_PROFILE);
+    // Cache the user data (non-blocking, with error handling)
+    try {
+      await this.cache.cacheUser(id, user, CACHE_TTL.USER_PROFILE);
+    } catch (cacheError) {
+      this.logger.warn(`Failed to cache user ${id}: ${cacheError.message}`);
+    }
 
-    // Add online status from Redis
-    const isOnline = await this.redis.isUserOnline(id);
+    // Add online status from Redis (with fallback)
+    let isOnline = false;
+    try {
+      isOnline = await this.redis.isUserOnline(id);
+    } catch (redisError) {
+      this.logger.warn(
+        `Redis error checking online status: ${redisError.message}`,
+      );
+    }
 
     return {
       ...user,
       numericId: user.numericId?.toString(),
       isOnline,
+      // Ensure wallet is always present (even if null in DB)
+      wallet: user.wallet ?? { balance: 0, diamonds: 0 },
     };
   }
 
@@ -100,7 +125,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
     const isOnline = await this.redis.isUserOnline(user.id);
@@ -137,7 +162,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
     const isOnline = await this.redis.isUserOnline(user.id);
@@ -191,7 +216,7 @@ export class UsersService {
     });
 
     if (existing && existing.id !== userId) {
-      throw new ConflictException('اسم المستخدم موجود بالفعل');
+      throw new ConflictException("اسم المستخدم موجود بالفعل");
     }
 
     const user = await this.prisma.user.update({
@@ -214,16 +239,24 @@ export class UsersService {
   // ================================
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 20, search, status, role, sortBy = 'createdAt', sortOrder = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 20,
+      search,
+      status,
+      role,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
 
     if (search) {
       where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { username: { contains: search, mode: 'insensitive' } },
-        { displayName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: "insensitive" } },
+        { username: { contains: search, mode: "insensitive" } },
+        { displayName: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -279,18 +312,22 @@ export class UsersService {
   // ADMIN UPDATE USER
   // ================================
 
-  async adminUpdate(targetId: string, dto: AdminUpdateUserDto, adminId: string) {
+  async adminUpdate(
+    targetId: string,
+    dto: AdminUpdateUserDto,
+    adminId: string,
+  ) {
     const target = await this.prisma.user.findUnique({
       where: { id: targetId },
     });
 
     if (!target) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
     // Prevent modifying super admins
     if (target.role === UserRole.SUPER_ADMIN) {
-      throw new ForbiddenException('لا يمكن تعديل صلاحيات المسؤول الأعلى');
+      throw new ForbiddenException("لا يمكن تعديل صلاحيات المسؤول الأعلى");
     }
 
     const updated = await this.prisma.user.update({
@@ -316,7 +353,8 @@ export class UsersService {
       data: {
         actorId: adminId,
         targetId,
-        action: dto.status === UserStatus.BANNED ? 'USER_BANNED' : 'SETTINGS_CHANGED',
+        action:
+          dto.status === UserStatus.BANNED ? "USER_BANNED" : "SETTINGS_CHANGED",
         details: dto as any,
       },
     });
@@ -336,11 +374,14 @@ export class UsersService {
     });
 
     if (!target) {
-      throw new NotFoundException('المستخدم غير موجود');
+      throw new NotFoundException("المستخدم غير موجود");
     }
 
-    if (target.role === UserRole.SUPER_ADMIN || target.role === UserRole.ADMIN) {
-      throw new ForbiddenException('لا يمكن حظر المسؤولين');
+    if (
+      target.role === UserRole.SUPER_ADMIN ||
+      target.role === UserRole.ADMIN
+    ) {
+      throw new ForbiddenException("لا يمكن حظر المسؤولين");
     }
 
     await this.prisma.$transaction([
@@ -358,7 +399,7 @@ export class UsersService {
         data: {
           actorId: adminId,
           targetId,
-          action: 'USER_BANNED',
+          action: "USER_BANNED",
           reason,
         },
       }),
@@ -369,7 +410,7 @@ export class UsersService {
 
     this.logger.log(`Admin ${adminId} banned user ${targetId}`);
 
-    return { message: 'تم حظر المستخدم' };
+    return { message: "تم حظر المستخدم" };
   }
 
   // ================================
@@ -386,14 +427,14 @@ export class UsersService {
         data: {
           actorId: adminId,
           targetId,
-          action: 'USER_UNBANNED',
+          action: "USER_UNBANNED",
         },
       }),
     ]);
 
     this.logger.log(`Admin ${adminId} unbanned user ${targetId}`);
 
-    return { message: 'تم رفع الحظر عن المستخدم' };
+    return { message: "تم رفع الحظر عن المستخدم" };
   }
 
   // ================================
@@ -401,19 +442,14 @@ export class UsersService {
   // ================================
 
   async getUserStats(userId: string) {
-    const [
-      roomsOwned,
-      roomsJoined,
-      messagesSent,
-      giftsSent,
-      giftsReceived,
-    ] = await Promise.all([
-      this.prisma.room.count({ where: { ownerId: userId } }),
-      this.prisma.roomMember.count({ where: { userId, leftAt: null } }),
-      this.prisma.message.count({ where: { senderId: userId } }),
-      this.prisma.giftSend.count({ where: { senderId: userId } }),
-      this.prisma.giftSend.count({ where: { receiverId: userId } }),
-    ]);
+    const [roomsOwned, roomsJoined, messagesSent, giftsSent, giftsReceived] =
+      await Promise.all([
+        this.prisma.room.count({ where: { ownerId: userId } }),
+        this.prisma.roomMember.count({ where: { userId, leftAt: null } }),
+        this.prisma.message.count({ where: { senderId: userId } }),
+        this.prisma.giftSend.count({ where: { senderId: userId } }),
+        this.prisma.giftSend.count({ where: { receiverId: userId } }),
+      ]);
 
     return {
       roomsOwned,

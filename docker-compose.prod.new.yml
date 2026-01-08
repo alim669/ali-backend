@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ali_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ali_user
+      POSTGRES_PASSWORD: ali_password_123
+      POSTGRES_DB: ali_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ali_user -d ali_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ali_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ali_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ali_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ali_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads_data:/var/www/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ali_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: ali_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - uploads_data:/var/www/uploads:ro
+    depends_on:
+      - backend
+    networks:
+      - ali_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  ali_network:
+    driver: bridge

@@ -7,9 +7,9 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { ReportType, ReportStatus } from '@prisma/client';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { ReportType, ReportStatus } from "@prisma/client";
 
 export interface CreateReportDto {
   type: ReportType;
@@ -37,7 +37,7 @@ export class ReportsService {
   async create(reporterId: string, dto: CreateReportDto) {
     // Validate that at least one target is provided
     if (!dto.reportedUserId && !dto.reportedRoomId) {
-      throw new BadRequestException('يجب تحديد مستخدم أو غرفة للإبلاغ عنها');
+      throw new BadRequestException("يجب تحديد مستخدم أو غرفة للإبلاغ عنها");
     }
 
     // Check reported user exists
@@ -46,10 +46,10 @@ export class ReportsService {
         where: { id: dto.reportedUserId },
       });
       if (!user) {
-        throw new NotFoundException('المستخدم المبلغ عنه غير موجود');
+        throw new NotFoundException("المستخدم المبلغ عنه غير موجود");
       }
       if (dto.reportedUserId === reporterId) {
-        throw new BadRequestException('لا يمكنك الإبلاغ عن نفسك');
+        throw new BadRequestException("لا يمكنك الإبلاغ عن نفسك");
       }
     }
 
@@ -59,7 +59,7 @@ export class ReportsService {
         where: { id: dto.reportedRoomId },
       });
       if (!room) {
-        throw new NotFoundException('الغرفة المبلغ عنها غير موجودة');
+        throw new NotFoundException("الغرفة المبلغ عنها غير موجودة");
       }
     }
 
@@ -116,7 +116,7 @@ export class ReportsService {
             select: { id: true, username: true, displayName: true },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -146,7 +146,13 @@ export class ReportsService {
           select: { id: true, username: true, displayName: true, email: true },
         },
         reportedUser: {
-          select: { id: true, username: true, displayName: true, email: true, status: true },
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            email: true,
+            status: true,
+          },
         },
         reportedRoom: {
           select: { id: true, name: true, status: true },
@@ -158,7 +164,7 @@ export class ReportsService {
     });
 
     if (!report) {
-      throw new NotFoundException('البلاغ غير موجود');
+      throw new NotFoundException("البلاغ غير موجود");
     }
 
     return report;
@@ -174,7 +180,7 @@ export class ReportsService {
     });
 
     if (!report) {
-      throw new NotFoundException('البلاغ غير موجود');
+      throw new NotFoundException("البلاغ غير موجود");
     }
 
     const updated = await this.prisma.report.update({
@@ -183,11 +189,16 @@ export class ReportsService {
         status: dto.status,
         resolution: dto.resolution,
         resolvedById: adminId,
-        resolvedAt: dto.status === 'RESOLVED' || dto.status === 'DISMISSED' ? new Date() : null,
+        resolvedAt:
+          dto.status === "RESOLVED" || dto.status === "DISMISSED"
+            ? new Date()
+            : null,
       },
     });
 
-    this.logger.log(`Report ${id} updated to ${dto.status} by admin ${adminId}`);
+    this.logger.log(
+      `Report ${id} updated to ${dto.status} by admin ${adminId}`,
+    );
 
     return updated;
   }
@@ -210,7 +221,7 @@ export class ReportsService {
             select: { id: true, name: true },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -234,7 +245,7 @@ export class ReportsService {
 
   async getPendingCount(): Promise<number> {
     return this.prisma.report.count({
-      where: { status: 'PENDING' },
+      where: { status: "PENDING" },
     });
   }
 
@@ -245,10 +256,10 @@ export class ReportsService {
   async getStats() {
     const [total, pending, reviewing, resolved, dismissed] = await Promise.all([
       this.prisma.report.count(),
-      this.prisma.report.count({ where: { status: 'PENDING' } }),
-      this.prisma.report.count({ where: { status: 'REVIEWING' } }),
-      this.prisma.report.count({ where: { status: 'RESOLVED' } }),
-      this.prisma.report.count({ where: { status: 'DISMISSED' } }),
+      this.prisma.report.count({ where: { status: "PENDING" } }),
+      this.prisma.report.count({ where: { status: "REVIEWING" } }),
+      this.prisma.report.count({ where: { status: "RESOLVED" } }),
+      this.prisma.report.count({ where: { status: "DISMISSED" } }),
     ]);
 
     return {

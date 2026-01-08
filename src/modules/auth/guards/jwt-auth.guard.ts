@@ -1,10 +1,14 @@
-import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
-import { Reflector } from '@nestjs/core';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import {
+  Injectable,
+  ExecutionContext,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
+import { Reflector } from "@nestjs/core";
+import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('jwt') {
+export class JwtAuthGuard extends AuthGuard("jwt") {
   constructor(private reflector: Reflector) {
     super();
   }
@@ -25,13 +29,13 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
   handleRequest(err: any, user: any, info: any) {
     if (err || !user) {
-      if (info?.name === 'TokenExpiredError') {
-        throw new UnauthorizedException('انتهت صلاحية الجلسة');
+      if (info?.name === "TokenExpiredError") {
+        throw new UnauthorizedException("انتهت صلاحية الجلسة");
       }
-      if (info?.name === 'JsonWebTokenError') {
-        throw new UnauthorizedException('Token غير صالح');
+      if (info?.name === "JsonWebTokenError") {
+        throw new UnauthorizedException("Token غير صالح");
       }
-      throw err || new UnauthorizedException('يرجى تسجيل الدخول');
+      throw err || new UnauthorizedException("يرجى تسجيل الدخول");
     }
     return user;
   }

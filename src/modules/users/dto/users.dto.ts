@@ -1,34 +1,41 @@
-import { IsString, IsOptional, MinLength, MaxLength, Matches, IsEnum } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { UserStatus } from '@prisma/client';
+import {
+  IsString,
+  IsOptional,
+  MinLength,
+  MaxLength,
+  Matches,
+  IsEnum,
+} from "class-validator";
+import { ApiPropertyOptional } from "@nestjs/swagger";
+import { UserStatus } from "@prisma/client";
 
 export class UpdateProfileDto {
-  @ApiPropertyOptional({ example: 'أحمد علي' })
+  @ApiPropertyOptional({ example: "أحمد علي" })
   @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(50)
   displayName?: string;
 
-  @ApiPropertyOptional({ example: 'مرحباً أنا أحمد' })
+  @ApiPropertyOptional({ example: "مرحباً أنا أحمد" })
   @IsOptional()
   @IsString()
   @MaxLength(500)
   bio?: string;
 
-  @ApiPropertyOptional({ example: 'https://example.com/avatar.jpg' })
+  @ApiPropertyOptional({ example: "https://example.com/avatar.jpg" })
   @IsOptional()
   @IsString()
   avatar?: string;
 }
 
 export class UpdateUsernameDto {
-  @ApiPropertyOptional({ example: 'new_username' })
+  @ApiPropertyOptional({ example: "new_username" })
   @IsString()
   @MinLength(3)
   @MaxLength(30)
   @Matches(/^[a-zA-Z0-9_]+$/, {
-    message: 'اسم المستخدم يجب أن يحتوي على أحرف وأرقام و _ فقط',
+    message: "اسم المستخدم يجب أن يحتوي على أحرف وأرقام و _ فقط",
   })
   username: string;
 }
@@ -82,10 +89,10 @@ export class UserQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sortBy?: string = 'createdAt';
+  sortBy?: string = "createdAt";
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  sortOrder?: 'asc' | 'desc' = 'desc';
+  sortOrder?: "asc" | "desc" = "desc";
 }

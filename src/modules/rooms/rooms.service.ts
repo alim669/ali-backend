@@ -5,11 +5,11 @@ import {
   ConflictException,
   BadRequestException,
   Logger,
-} from '@nestjs/common';
-import * as argon2 from 'argon2';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { CacheService, CACHE_TTL } from '../../common/cache/cache.service';
+} from "@nestjs/common";
+import * as argon2 from "argon2";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { CacheService, CACHE_TTL } from "../../common/cache/cache.service";
 import {
   CreateRoomDto,
   UpdateRoomDto,
@@ -17,8 +17,15 @@ import {
   UpdateMemberDto,
   RoomQueryDto,
   KickMemberDto,
-} from './dto/rooms.dto';
-import { RoomStatus, MemberRole, RoomType, Prisma, Room, RoomMember } from '@prisma/client';
+} from "./dto/rooms.dto";
+import {
+  RoomStatus,
+  MemberRole,
+  RoomType,
+  Prisma,
+  Room,
+  RoomMember,
+} from "@prisma/client";
 
 @Injectable()
 export class RoomsService {
@@ -35,41 +42,45 @@ export class RoomsService {
   // ================================
 
   async create(dto: CreateRoomDto, userId: string) {
-    this.logger.log(`📦 Creating room: name="${dto.name}", type="${dto.type}", userId="${userId}"`);
-    
+    this.logger.log(
+      `📦 Creating room: name="${dto.name}", type="${dto.type}", userId="${userId}"`,
+    );
+
     let passwordHash: string | null = null;
 
     if (dto.password) {
       passwordHash = await argon2.hash(dto.password);
     }
 
-    const room = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Create room
-      const newRoom = await tx.room.create({
-        data: {
-          name: dto.name,
-          description: dto.description,
-          avatar: dto.avatar,
-          type: dto.type || RoomType.PUBLIC,
-          maxMembers: dto.maxMembers || 100,
-          ownerId: userId,
-          isPasswordProtected: !!dto.password,
-          passwordHash,
-          currentMembers: 1,
-        },
-      });
+    const room = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // Create room
+        const newRoom = await tx.room.create({
+          data: {
+            name: dto.name,
+            description: dto.description,
+            avatar: dto.avatar,
+            type: dto.type || RoomType.PUBLIC,
+            maxMembers: dto.maxMembers || 100,
+            ownerId: userId,
+            isPasswordProtected: !!dto.password,
+            passwordHash,
+            currentMembers: 1,
+          },
+        });
 
-      // Add owner as first member
-      await tx.roomMember.create({
-        data: {
-          roomId: newRoom.id,
-          userId,
-          role: MemberRole.OWNER,
-        },
-      });
+        // Add owner as first member
+        await tx.roomMember.create({
+          data: {
+            roomId: newRoom.id,
+            userId,
+            role: MemberRole.OWNER,
+          },
+        });
 
-      return newRoom;
-    });
+        return newRoom;
+      },
+    );
 
     this.logger.log(`User ${userId} created room ${room.id}`);
 
@@ -92,14 +103,14 @@ export class RoomsService {
 
   async findAll(query: RoomQueryDto) {
     this.logger.log(`🔍 findAll rooms query: ${JSON.stringify(query)}`);
-    
+
     const {
       page = 1,
       limit = 20,
       search,
       type,
-      sortBy = 'currentMembers',
-      sortOrder = 'desc',
+      sortBy = "currentMembers",
+      sortOrder = "desc",
     } = query;
     const skip = (page - 1) * limit;
 
@@ -109,8 +120,8 @@ export class RoomsService {
 
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: "insensitive" } },
+        { description: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -187,7 +198,7 @@ export class RoomsService {
         members: {
           where: { leftAt: null, isBanned: false },
           take: 50,
-          orderBy: { joinedAt: 'asc' },
+          orderBy: { joinedAt: "asc" },
           include: {
             user: {
               select: {
@@ -203,7 +214,7 @@ export class RoomsService {
     });
 
     if (!room) {
-      throw new NotFoundException('الغرفة غير موجودة');
+      throw new NotFoundException("الغرفة غير موجودة");
     }
 
     // Check if user is member
@@ -234,7 +245,10 @@ export class RoomsService {
   // ================================
 
   async update(roomId: string, dto: UpdateRoomDto, userId: string) {
-    const room = await this.getRoomWithPermission(roomId, userId, [MemberRole.OWNER, MemberRole.ADMIN]);
+    const room = await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+    ]);
 
     const updated = await this.prisma.room.update({
       where: { id: roomId },
@@ -261,7 +275,9 @@ export class RoomsService {
   // ================================
 
   async delete(roomId: string, userId: string) {
-    const room = await this.getRoomWithPermission(roomId, userId, [MemberRole.OWNER]);
+    const room = await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+    ]);
 
     await this.prisma.$transaction([
       // Delete all members
@@ -274,13 +290,13 @@ export class RoomsService {
 
     // Clear Redis data
     await this.redis.del(`room:${roomId}:online`);
-    
+
     // Invalidate cache
     await this.cache.invalidateRoom(roomId);
 
     this.logger.log(`User ${userId} deleted room ${roomId}`);
 
-    return { message: 'تم حذف الغرفة' };
+    return { message: "تم حذف الغرفة" };
   }
 
   // ================================
@@ -293,11 +309,11 @@ export class RoomsService {
     });
 
     if (!room) {
-      throw new NotFoundException('الغرفة غير موجودة');
+      throw new NotFoundException("الغرفة غير موجودة");
     }
 
     if (room.status !== RoomStatus.ACTIVE) {
-      throw new ForbiddenException('الغرفة مغلقة');
+      throw new ForbiddenException("الغرفة مغلقة");
     }
 
     // Check existing membership
@@ -307,8 +323,11 @@ export class RoomsService {
 
     if (existingMember) {
       if (existingMember.isBanned) {
-        if (existingMember.bannedUntil && existingMember.bannedUntil > new Date()) {
-          throw new ForbiddenException('أنت محظور من هذه الغرفة');
+        if (
+          existingMember.bannedUntil &&
+          existingMember.bannedUntil > new Date()
+        ) {
+          throw new ForbiddenException("أنت محظور من هذه الغرفة");
         }
         // Unban if ban expired
         await this.prisma.roomMember.update({
@@ -318,7 +337,7 @@ export class RoomsService {
       }
 
       if (!existingMember.leftAt) {
-        throw new ConflictException('أنت عضو بالفعل في هذه الغرفة');
+        throw new ConflictException("أنت عضو بالفعل في هذه الغرفة");
       }
 
       // Rejoin
@@ -329,18 +348,18 @@ export class RoomsService {
     } else {
       // Check capacity
       if (room.currentMembers >= room.maxMembers) {
-        throw new ForbiddenException('الغرفة ممتلئة');
+        throw new ForbiddenException("الغرفة ممتلئة");
       }
 
       // Check password
       if (room.isPasswordProtected && room.passwordHash) {
         if (!dto?.password) {
-          throw new BadRequestException('هذه الغرفة تتطلب كلمة مرور');
+          throw new BadRequestException("هذه الغرفة تتطلب كلمة مرور");
         }
 
         const isValid = await argon2.verify(room.passwordHash, dto.password);
         if (!isValid) {
-          throw new ForbiddenException('كلمة المرور غير صحيحة');
+          throw new ForbiddenException("كلمة المرور غير صحيحة");
         }
       }
 
@@ -362,7 +381,7 @@ export class RoomsService {
 
     this.logger.log(`User ${userId} joined room ${roomId}`);
 
-    return { message: 'تم الانضمام للغرفة' };
+    return { message: "تم الانضمام للغرفة" };
   }
 
   // ================================
@@ -375,12 +394,14 @@ export class RoomsService {
     });
 
     if (!membership || membership.leftAt) {
-      throw new BadRequestException('أنت لست عضواً في هذه الغرفة');
+      throw new BadRequestException("أنت لست عضواً في هذه الغرفة");
     }
 
     // Owner cannot leave, must transfer or delete
     if (membership.role === MemberRole.OWNER) {
-      throw new ForbiddenException('لا يمكن لمالك الغرفة المغادرة. قم بنقل الملكية أو حذف الغرفة');
+      throw new ForbiddenException(
+        "لا يمكن لمالك الغرفة المغادرة. قم بنقل الملكية أو حذف الغرفة",
+      );
     }
 
     await this.prisma.$transaction([
@@ -399,27 +420,36 @@ export class RoomsService {
 
     this.logger.log(`User ${userId} left room ${roomId}`);
 
-    return { message: 'تم مغادرة الغرفة' };
+    return { message: "تم مغادرة الغرفة" };
   }
 
   // ================================
   // KICK MEMBER
   // ================================
 
-  async kickMember(roomId: string, targetId: string, userId: string, dto?: KickMemberDto) {
-    await this.getRoomWithPermission(roomId, userId, [MemberRole.OWNER, MemberRole.ADMIN, MemberRole.MODERATOR]);
+  async kickMember(
+    roomId: string,
+    targetId: string,
+    userId: string,
+    dto?: KickMemberDto,
+  ) {
+    await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+      MemberRole.MODERATOR,
+    ]);
 
     const targetMembership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId: targetId } },
     });
 
     if (!targetMembership) {
-      throw new NotFoundException('العضو غير موجود');
+      throw new NotFoundException("العضو غير موجود");
     }
 
     // Cannot kick owner
     if (targetMembership.role === MemberRole.OWNER) {
-      throw new ForbiddenException('لا يمكن طرد مالك الغرفة');
+      throw new ForbiddenException("لا يمكن طرد مالك الغرفة");
     }
 
     await this.prisma.$transaction([
@@ -442,26 +472,34 @@ export class RoomsService {
 
     this.logger.log(`User ${userId} kicked ${targetId} from room ${roomId}`);
 
-    return { message: dto?.ban ? 'تم طرد وحظر العضو' : 'تم طرد العضو' };
+    return { message: dto?.ban ? "تم طرد وحظر العضو" : "تم طرد العضو" };
   }
 
   // ================================
   // UPDATE MEMBER ROLE
   // ================================
 
-  async updateMember(roomId: string, targetId: string, userId: string, dto: UpdateMemberDto) {
-    await this.getRoomWithPermission(roomId, userId, [MemberRole.OWNER, MemberRole.ADMIN]);
+  async updateMember(
+    roomId: string,
+    targetId: string,
+    userId: string,
+    dto: UpdateMemberDto,
+  ) {
+    await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+    ]);
 
     const targetMembership = await this.prisma.roomMember.findUnique({
       where: { roomId_userId: { roomId, userId: targetId } },
     });
 
     if (!targetMembership) {
-      throw new NotFoundException('العضو غير موجود');
+      throw new NotFoundException("العضو غير موجود");
     }
 
     if (targetMembership.role === MemberRole.OWNER) {
-      throw new ForbiddenException('لا يمكن تعديل صلاحيات المالك');
+      throw new ForbiddenException("لا يمكن تعديل صلاحيات المالك");
     }
 
     const updated = await this.prisma.roomMember.update({
@@ -469,7 +507,9 @@ export class RoomsService {
       data: dto,
     });
 
-    this.logger.log(`User ${userId} updated member ${targetId} in room ${roomId}`);
+    this.logger.log(
+      `User ${userId} updated member ${targetId} in room ${roomId}`,
+    );
 
     return updated;
   }
@@ -494,7 +534,7 @@ export class RoomsService {
           },
         },
       },
-      orderBy: { joinedAt: 'desc' },
+      orderBy: { joinedAt: "desc" },
     });
 
     return memberships.map((m: RoomMember & { room: Room }) => ({
@@ -525,8 +565,8 @@ export class RoomsService {
           },
         },
         orderBy: [
-          { role: 'asc' }, // Owner first, then Admin, Moderator, Member
-          { joinedAt: 'asc' },
+          { role: "asc" }, // Owner first, then Admin, Moderator, Member
+          { joinedAt: "asc" },
         ],
         skip,
         take: limit,
@@ -538,10 +578,21 @@ export class RoomsService {
 
     // Add online status
     const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
-    const membersWithOnline = members.map((m: RoomMember & { user: { id: string; username: string; displayName: string | null; avatar: string | null } }) => ({
-      ...m,
-      isOnline: onlineUsers.includes(m.userId),
-    }));
+    const membersWithOnline = members.map(
+      (
+        m: RoomMember & {
+          user: {
+            id: string;
+            username: string;
+            displayName: string | null;
+            avatar: string | null;
+          };
+        },
+      ) => ({
+        ...m,
+        isOnline: onlineUsers.includes(m.userId),
+      }),
+    );
 
     return {
       data: membersWithOnline,
@@ -561,7 +612,7 @@ export class RoomsService {
     });
 
     if (!newOwnerMembership || newOwnerMembership.leftAt) {
-      throw new NotFoundException('المستخدم ليس عضواً في الغرفة');
+      throw new NotFoundException("المستخدم ليس عضواً في الغرفة");
     }
 
     await this.prisma.$transaction([
@@ -582,22 +633,28 @@ export class RoomsService {
       }),
     ]);
 
-    this.logger.log(`User ${userId} transferred ownership of room ${roomId} to ${newOwnerId}`);
+    this.logger.log(
+      `User ${userId} transferred ownership of room ${roomId} to ${newOwnerId}`,
+    );
 
-    return { message: 'تم نقل الملكية' };
+    return { message: "تم نقل الملكية" };
   }
 
   // ================================
   // HELPER: Check Permission
   // ================================
 
-  private async getRoomWithPermission(roomId: string, userId: string, allowedRoles: MemberRole[]) {
+  private async getRoomWithPermission(
+    roomId: string,
+    userId: string,
+    allowedRoles: MemberRole[],
+  ) {
     const room = await this.prisma.room.findUnique({
       where: { id: roomId },
     });
 
     if (!room) {
-      throw new NotFoundException('الغرفة غير موجودة');
+      throw new NotFoundException("الغرفة غير موجودة");
     }
 
     const membership = await this.prisma.roomMember.findUnique({
@@ -605,7 +662,7 @@ export class RoomsService {
     });
 
     if (!membership || !allowedRoles.includes(membership.role)) {
-      throw new ForbiddenException('ليس لديك الصلاحية');
+      throw new ForbiddenException("ليس لديك الصلاحية");
     }
 
     return room;

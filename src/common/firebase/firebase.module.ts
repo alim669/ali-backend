@@ -1,5 +1,5 @@
-import { Module, Global } from '@nestjs/common';
-import { FirebasePushService } from './firebase-push.service';
+import { Module, Global } from "@nestjs/common";
+import { FirebasePushService } from "./firebase-push.service";
 
 @Global()
 @Module({

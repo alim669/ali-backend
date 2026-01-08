@@ -2,10 +2,10 @@
  * Notifications Service - خدمة الإشعارات
  */
 
-import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { NotificationType } from '@prisma/client';
+import { Injectable, Logger } from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { NotificationType } from "@prisma/client";
 
 export interface CreateNotificationDto {
   userId: string;
@@ -28,7 +28,7 @@ export class NotificationsService {
   // CREATE NOTIFICATION
   // ================================
 
-  async create(dto: CreateNotificationDto) {
+  async create(dto: CreateNotificationDto): Promise<any> {
     const notification = await this.prisma.notification.create({
       data: {
         userId: dto.userId,
@@ -40,10 +40,13 @@ export class NotificationsService {
     });
 
     // Publish to Redis for real-time delivery
-    await this.redis.publish('notifications:new', JSON.stringify({
-      userId: dto.userId,
-      notification,
-    }));
+    await this.redis.publish(
+      "notifications:new",
+      JSON.stringify({
+        userId: dto.userId,
+        notification,
+      }),
+    );
 
     this.logger.log(`Notification created for user ${dto.userId}: ${dto.type}`);
 
@@ -54,9 +57,12 @@ export class NotificationsService {
   // BULK CREATE (for broadcasting)
   // ================================
 
-  async createMany(userIds: string[], dto: Omit<CreateNotificationDto, 'userId'>) {
+  async createMany(
+    userIds: string[],
+    dto: Omit<CreateNotificationDto, "userId">,
+  ) {
     const notifications = await this.prisma.notification.createMany({
-      data: userIds.map(userId => ({
+      data: userIds.map((userId) => ({
         userId,
         type: dto.type,
         title: dto.title,
@@ -65,7 +71,9 @@ export class NotificationsService {
       })),
     });
 
-    this.logger.log(`${notifications.count} notifications created for ${dto.type}`);
+    this.logger.log(
+      `${notifications.count} notifications created for ${dto.type}`,
+    );
 
     return notifications;
   }
@@ -74,7 +82,7 @@ export class NotificationsService {
   // GET USER NOTIFICATIONS
   // ================================
 
-  async findByUser(userId: string, page = 1, limit = 20, unreadOnly = false) {
+  async findByUser(userId: string, page = 1, limit = 20, unreadOnly = false): Promise<any> {
     const skip = (page - 1) * limit;
 
     const where: any = { userId };
@@ -85,7 +93,7 @@ export class NotificationsService {
     const [notifications, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -172,11 +180,11 @@ export class NotificationsService {
     senderName: string,
     giftName: string,
     roomId?: string,
-  ) {
+  ): Promise<any> {
     return this.create({
       userId: receiverId,
-      type: 'GIFT_RECEIVED',
-      title: '🎁 هدية جديدة!',
+      type: "GIFT_RECEIVED",
+      title: "🎁 هدية جديدة!",
       body: `أرسل لك ${senderName} هدية ${giftName}`,
       data: { roomId },
     });
@@ -186,11 +194,15 @@ export class NotificationsService {
   // HELPER: Create Follow Notification
   // ================================
 
-  async notifyNewFollower(userId: string, followerName: string, followerId: string) {
+  async notifyNewFollower(
+    userId: string,
+    followerName: string,
+    followerId: string,
+  ): Promise<any> {
     return this.create({
       userId,
-      type: 'NEW_FOLLOWER',
-      title: '👤 متابع جديد!',
+      type: "NEW_FOLLOWER",
+      title: "👤 متابع جديد!",
       body: `بدأ ${followerName} بمتابعتك`,
       data: { followerId },
     });
@@ -200,11 +212,16 @@ export class NotificationsService {
   // HELPER: Create Room Invite Notification
   // ================================
 
-  async notifyRoomInvite(userId: string, roomName: string, roomId: string, inviterName: string) {
+  async notifyRoomInvite(
+    userId: string,
+    roomName: string,
+    roomId: string,
+    inviterName: string,
+  ): Promise<any> {
     return this.create({
       userId,
-      type: 'ROOM_INVITE',
-      title: '📩 دعوة للانضمام',
+      type: "ROOM_INVITE",
+      title: "📩 دعوة للانضمام",
       body: `دعاك ${inviterName} للانضمام إلى غرفة "${roomName}"`,
       data: { roomId },
     });

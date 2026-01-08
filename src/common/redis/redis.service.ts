@@ -1,6 +1,11 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import Redis from "ioredis";
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -9,25 +14,34 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private subscriber: Redis | null = null;
   private publisher: Redis | null = null;
   private enabled = true;
-  
+
   // In-memory fallback for development without Redis
-  private memoryCache = new Map<string, { value: string; expiresAt?: number }>();
-  private memorySubscriptions = new Map<string, ((message: string) => void)[]>();
+  private memoryCache = new Map<
+    string,
+    { value: string; expiresAt?: number }
+  >();
+  private memorySubscriptions = new Map<
+    string,
+    ((message: string) => void)[]
+  >();
 
   constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
-    const redisEnabled = this.configService.get<string>('REDIS_ENABLED', 'true');
-    
-    if (redisEnabled === 'false') {
+    const redisEnabled = this.configService.get<string>(
+      "REDIS_ENABLED",
+      "true",
+    );
+
+    if (redisEnabled === "false") {
       this.enabled = false;
-      this.logger.warn('⚠️ Redis disabled, using in-memory fallback');
+      this.logger.warn("⚠️ Redis disabled, using in-memory fallback");
       return;
     }
-    
-    const host = this.configService.get<string>('REDIS_HOST', 'localhost');
-    const port = this.configService.get<number>('REDIS_PORT', 6379);
-    const password = this.configService.get<string>('REDIS_PASSWORD', '');
+
+    const host = this.configService.get<string>("REDIS_HOST", "localhost");
+    const port = this.configService.get<number>("REDIS_PORT", 6379);
+    const password = this.configService.get<string>("REDIS_PASSWORD", "");
 
     const options: any = {
       host,
@@ -54,7 +68,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log(`✅ Connected to Redis at ${host}:${port}`);
     } catch (error) {
-      this.logger.warn(`⚠️ Redis connection failed, using in-memory fallback: ${error}`);
+      this.logger.warn(
+        `⚠️ Redis connection failed, using in-memory fallback: ${error}`,
+      );
       this.enabled = false;
       this.client = null;
       this.subscriber = null;
@@ -69,7 +85,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         this.subscriber?.quit(),
         this.publisher?.quit(),
       ]);
-      this.logger.log('Disconnected from Redis');
+      this.logger.log("Disconnected from Redis");
     }
   }
 
@@ -82,7 +98,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (!this.client) return false;
     try {
       const result = await this.client.ping();
-      return result === 'PONG';
+      return result === "PONG";
     } catch {
       return false;
     }
@@ -95,7 +111,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   getPublisher(): Redis | null {
     return this.publisher;
   }
-  
+
   isEnabled(): boolean {
     return this.enabled && this.client !== null;
   }
@@ -119,7 +135,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async set(key: string, value: string, expirySeconds?: number): Promise<void> {
     if (!this.isEnabled()) {
-      const expiresAt = expirySeconds ? Date.now() + expirySeconds * 1000 : undefined;
+      const expiresAt = expirySeconds
+        ? Date.now() + expirySeconds * 1000
+        : undefined;
       this.memoryCache.set(key, { value, expiresAt });
       return;
     }
@@ -160,14 +178,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return value ? JSON.parse(value) : null;
   }
 
-  async setJson<T>(key: string, value: T, expirySeconds?: number): Promise<void> {
+  async setJson<T>(
+    key: string,
+    value: T,
+    expirySeconds?: number,
+  ): Promise<void> {
     await this.set(key, JSON.stringify(value), expirySeconds);
   }
 
   // ================================
   // Hash Operations (for user presence, typing)
   // ================================
-  
+
   // In-memory hash storage
   private memoryHashes = new Map<string, Map<string, string>>();
 
@@ -206,13 +228,17 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client!.hgetall(key);
   }
 
-  async hincrby(key: string, field: string, increment: number): Promise<number> {
+  async hincrby(
+    key: string,
+    field: string,
+    increment: number,
+  ): Promise<number> {
     if (!this.isEnabled()) {
       if (!this.memoryHashes.has(key)) {
         this.memoryHashes.set(key, new Map());
       }
       const hash = this.memoryHashes.get(key)!;
-      const current = parseInt(hash.get(field) || '0');
+      const current = parseInt(hash.get(field) || "0");
       const newValue = current + increment;
       hash.set(field, newValue.toString());
       return newValue;
@@ -223,7 +249,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   // ================================
   // Set Operations (for room members online)
   // ================================
-  
+
   // In-memory set storage
   private memorySets = new Map<string, Set<string>>();
 
@@ -233,7 +259,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         this.memorySets.set(key, new Set());
       }
       const set = this.memorySets.get(key)!;
-      members.forEach(m => set.add(m));
+      members.forEach((m) => set.add(m));
       return;
     }
     await this.client!.sadd(key, ...members);
@@ -242,7 +268,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async srem(key: string, ...members: string[]): Promise<void> {
     if (!this.isEnabled()) {
       const set = this.memorySets.get(key);
-      if (set) members.forEach(m => set.delete(m));
+      if (set) members.forEach((m) => set.delete(m));
       return;
     }
     await this.client!.srem(key, ...members);
@@ -274,17 +300,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   // ================================
 
   async publish(channel: string, message: any): Promise<void> {
-    const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+    const msgStr =
+      typeof message === "string" ? message : JSON.stringify(message);
     if (!this.isEnabled()) {
       // In-memory pub/sub
       const callbacks = this.memorySubscriptions.get(channel) || [];
-      callbacks.forEach(cb => cb(msgStr));
+      callbacks.forEach((cb) => cb(msgStr));
       return;
     }
     await this.publisher!.publish(channel, msgStr);
   }
 
-  async subscribe(channel: string, callback: (message: string) => void): Promise<void> {
+  async subscribe(
+    channel: string,
+    callback: (message: string) => void,
+  ): Promise<void> {
     if (!this.isEnabled()) {
       // In-memory subscription
       if (!this.memorySubscriptions.has(channel)) {
@@ -295,7 +325,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.subscriber!.subscribe(channel);
-    this.subscriber!.on('message', (ch, message) => {
+    this.subscriber!.on("message", (ch, message) => {
       if (ch === channel) {
         callback(message);
       }
@@ -313,19 +343,29 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   // ================================
   // Rate Limiting
   // ================================
-  
+
   // In-memory rate limit counters
-  private memoryRateLimits = new Map<string, { count: number; expiresAt: number }>();
-  
+  private memoryRateLimits = new Map<
+    string,
+    { count: number; expiresAt: number }
+  >();
+
   // In-memory sorted sets
   private memorySortedSets = new Map<string, Map<string, number>>();
 
-  async checkRateLimit(key: string, limit: number, windowSeconds: number): Promise<boolean> {
+  async checkRateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+  ): Promise<boolean> {
     if (!this.isEnabled()) {
       const now = Date.now();
       const entry = this.memoryRateLimits.get(key);
       if (!entry || now > entry.expiresAt) {
-        this.memoryRateLimits.set(key, { count: 1, expiresAt: now + windowSeconds * 1000 });
+        this.memoryRateLimits.set(key, {
+          count: 1,
+          expiresAt: now + windowSeconds * 1000,
+        });
         return true;
       }
       entry.count++;
@@ -347,7 +387,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       const entry = this.memoryCache.get(key);
       const current = entry ? parseInt(entry.value) || 0 : 0;
       const newValue = current + 1;
-      this.memoryCache.set(key, { value: newValue.toString(), expiresAt: entry?.expiresAt });
+      this.memoryCache.set(key, {
+        value: newValue.toString(),
+        expiresAt: entry?.expiresAt,
+      });
       return newValue;
     }
     return this.client!.incr(key);
@@ -366,8 +409,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async keys(pattern: string): Promise<string[]> {
     if (!this.isEnabled()) {
-      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-      return Array.from(this.memoryCache.keys()).filter(k => regex.test(k));
+      const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+      return Array.from(this.memoryCache.keys()).filter((k) => regex.test(k));
     }
     return this.client!.keys(pattern);
   }
@@ -394,20 +437,25 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client!.zcard(key);
   }
 
-  async zrange(key: string, start: number, stop: number, withScores?: string): Promise<string[]> {
+  async zrange(
+    key: string,
+    start: number,
+    stop: number,
+    withScores?: string,
+  ): Promise<string[]> {
     if (!this.isEnabled()) {
       const set = this.memorySortedSets.get(key);
       if (!set) return [];
       const entries = Array.from(set.entries())
         .sort((a, b) => a[1] - b[1])
         .slice(start, stop === -1 ? undefined : stop + 1);
-      if (withScores === 'WITHSCORES') {
+      if (withScores === "WITHSCORES") {
         return entries.flatMap(([member, score]) => [member, score.toString()]);
       }
       return entries.map(([member]) => member);
     }
-    if (withScores === 'WITHSCORES') {
-      return this.client!.zrange(key, start, stop, 'WITHSCORES');
+    if (withScores === "WITHSCORES") {
+      return this.client!.zrange(key, start, stop, "WITHSCORES");
     }
     return this.client!.zrange(key, start, stop);
   }
@@ -468,7 +516,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   // Presence Operations
   // ================================
 
-  async setUserOnline(userId: string, socketId: string, metadata?: object): Promise<void> {
+  async setUserOnline(
+    userId: string,
+    socketId: string,
+    metadata?: object,
+  ): Promise<void> {
     const key = `presence:user:${userId}`;
     const data = {
       socketId,

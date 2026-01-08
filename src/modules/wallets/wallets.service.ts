@@ -3,16 +3,16 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   DepositDto,
   WithdrawDto,
   DeductDto,
   AdminAdjustBalanceDto,
   TransactionQueryDto,
-} from './dto/wallets.dto';
-import { TransactionType, TransactionStatus, Prisma } from '@prisma/client';
+} from "./dto/wallets.dto";
+import { TransactionType, TransactionStatus, Prisma } from "@prisma/client";
 
 @Injectable()
 export class WalletsService {
@@ -36,7 +36,7 @@ export class WalletsService {
       });
 
       if (!user) {
-        throw new NotFoundException('المستخدم غير موجود');
+        throw new NotFoundException("المستخدم غير موجود");
       }
 
       // Create wallet if doesn't exist
@@ -66,36 +66,38 @@ export class WalletsService {
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
-    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const updatedWallet = await tx.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          balance: { increment: dto.amount },
-          version: { increment: 1 },
-        },
-      });
-
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: TransactionType.DEPOSIT,
-          status: TransactionStatus.COMPLETED,
-          amount: dto.amount,
-          balanceBefore: wallet.balance,
-          balanceAfter: updatedWallet.balance,
-          description: 'إيداع رصيد',
-          metadata: {
-            paymentMethod: dto.paymentMethod,
-            transactionId: dto.transactionId,
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const updatedWallet = await tx.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            balance: { increment: dto.amount },
+            version: { increment: 1 },
           },
-        },
-      });
+        });
 
-      return updatedWallet;
-    });
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: TransactionType.DEPOSIT,
+            status: TransactionStatus.COMPLETED,
+            amount: dto.amount,
+            balanceBefore: wallet.balance,
+            balanceAfter: updatedWallet.balance,
+            description: "إيداع رصيد",
+            metadata: {
+              paymentMethod: dto.paymentMethod,
+              transactionId: dto.transactionId,
+            },
+          },
+        });
+
+        return updatedWallet;
+      },
+    );
 
     this.logger.log(`Deposit: ${dto.amount} coins to user ${userId}`);
 
@@ -115,54 +117,58 @@ export class WalletsService {
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
     if (wallet.balance < dto.amount) {
-      throw new BadRequestException('رصيد غير كافي');
+      throw new BadRequestException("رصيد غير كافي");
     }
 
     // Minimum withdrawal
     if (dto.amount < 100) {
-      throw new BadRequestException('الحد الأدنى للسحب 100 عملة');
+      throw new BadRequestException("الحد الأدنى للسحب 100 عملة");
     }
 
-    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const updatedWallet = await tx.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          balance: { decrement: dto.amount },
-          version: { increment: 1 },
-        },
-      });
-
-      const transaction = await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: TransactionType.WITHDRAWAL,
-          status: TransactionStatus.PENDING, // Needs admin approval
-          amount: -dto.amount,
-          balanceBefore: wallet.balance,
-          balanceAfter: updatedWallet.balance,
-          description: 'طلب سحب',
-          metadata: {
-            withdrawMethod: dto.withdrawMethod,
-            accountInfo: dto.accountInfo,
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const updatedWallet = await tx.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            balance: { decrement: dto.amount },
+            version: { increment: 1 },
           },
-        },
-      });
+        });
 
-      return { wallet: updatedWallet, transaction };
-    });
+        const transaction = await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: TransactionType.WITHDRAWAL,
+            status: TransactionStatus.PENDING, // Needs admin approval
+            amount: -dto.amount,
+            balanceBefore: wallet.balance,
+            balanceAfter: updatedWallet.balance,
+            description: "طلب سحب",
+            metadata: {
+              withdrawMethod: dto.withdrawMethod,
+              accountInfo: dto.accountInfo,
+            },
+          },
+        });
 
-    this.logger.log(`Withdrawal request: ${dto.amount} coins from user ${userId}`);
+        return { wallet: updatedWallet, transaction };
+      },
+    );
+
+    this.logger.log(
+      `Withdrawal request: ${dto.amount} coins from user ${userId}`,
+    );
 
     return {
       success: true,
       newBalance: result.wallet.balance,
       transactionId: result.transaction.id,
-      status: 'pending',
-      message: 'تم إرسال طلب السحب وسيتم مراجعته',
+      status: "pending",
+      message: "تم إرسال طلب السحب وسيتم مراجعته",
     };
   }
 
@@ -176,53 +182,63 @@ export class WalletsService {
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
     // Check balance based on type
-    const balanceToCheck = dto.type === 'diamonds' ? wallet.diamonds : wallet.balance;
-    
+    const balanceToCheck =
+      dto.type === "diamonds" ? wallet.diamonds : wallet.balance;
+
     if (balanceToCheck < dto.amount) {
-      throw new BadRequestException('رصيد غير كافي');
+      throw new BadRequestException("رصيد غير كافي");
     }
 
-    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Update balance based on type
-      const updateData = dto.type === 'diamonds'
-        ? { diamonds: { decrement: dto.amount }, version: { increment: 1 } }
-        : { balance: { decrement: dto.amount }, version: { increment: 1 } };
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // Update balance based on type
+        const updateData =
+          dto.type === "diamonds"
+            ? { diamonds: { decrement: dto.amount }, version: { increment: 1 } }
+            : { balance: { decrement: dto.amount }, version: { increment: 1 } };
 
-      const updatedWallet = await tx.wallet.update({
-        where: { id: wallet.id },
-        data: updateData,
-      });
+        const updatedWallet = await tx.wallet.update({
+          where: { id: wallet.id },
+          data: updateData,
+        });
 
-      const balanceBefore = dto.type === 'diamonds' ? wallet.diamonds : wallet.balance;
-      const balanceAfter = dto.type === 'diamonds' ? updatedWallet.diamonds : updatedWallet.balance;
+        const balanceBefore =
+          dto.type === "diamonds" ? wallet.diamonds : wallet.balance;
+        const balanceAfter =
+          dto.type === "diamonds"
+            ? updatedWallet.diamonds
+            : updatedWallet.balance;
 
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: TransactionType.PURCHASE,
-          status: TransactionStatus.COMPLETED,
-          amount: -dto.amount,
-          balanceBefore,
-          balanceAfter,
-          description: dto.reason || 'عملية شراء',
-          metadata: {
-            type: dto.type || 'coins',
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: TransactionType.PURCHASE,
+            status: TransactionStatus.COMPLETED,
+            amount: -dto.amount,
+            balanceBefore,
+            balanceAfter,
+            description: dto.reason || "عملية شراء",
+            metadata: {
+              type: dto.type || "coins",
+            },
           },
-        },
-      });
+        });
 
-      return updatedWallet;
-    });
+        return updatedWallet;
+      },
+    );
 
-    this.logger.log(`Deduct: ${dto.amount} ${dto.type || 'coins'} from user ${userId}`);
+    this.logger.log(
+      `Deduct: ${dto.amount} ${dto.type || "coins"} from user ${userId}`,
+    );
 
     return {
       success: true,
-      newBalance: dto.type === 'diamonds' ? result.diamonds : result.balance,
+      newBalance: dto.type === "diamonds" ? result.diamonds : result.balance,
     };
   }
 
@@ -236,7 +252,7 @@ export class WalletsService {
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
     const { page = 1, limit = 20, type, startDate, endDate } = query;
@@ -259,7 +275,7 @@ export class WalletsService {
     const [transactions, total] = await Promise.all([
       this.prisma.walletTransaction.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -281,60 +297,68 @@ export class WalletsService {
   // ADMIN: ADJUST BALANCE
   // ================================
 
-  async adminAdjustBalance(targetUserId: string, dto: AdminAdjustBalanceDto, adminId: string) {
+  async adminAdjustBalance(
+    targetUserId: string,
+    dto: AdminAdjustBalanceDto,
+    adminId: string,
+  ) {
     const wallet = await this.prisma.wallet.findUnique({
       where: { userId: targetUserId },
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
     if (dto.amount < 0 && wallet.balance < Math.abs(dto.amount)) {
-      throw new BadRequestException('لا يمكن خصم أكثر من الرصيد المتاح');
+      throw new BadRequestException("لا يمكن خصم أكثر من الرصيد المتاح");
     }
 
-    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const updatedWallet = await tx.wallet.update({
-        where: { id: wallet.id },
-        data: {
-          balance: { increment: dto.amount },
-          version: { increment: 1 },
-        },
-      });
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const updatedWallet = await tx.wallet.update({
+          where: { id: wallet.id },
+          data: {
+            balance: { increment: dto.amount },
+            version: { increment: 1 },
+          },
+        });
 
-      await tx.walletTransaction.create({
-        data: {
-          walletId: wallet.id,
-          type: TransactionType.ADMIN_ADJUSTMENT,
-          status: TransactionStatus.COMPLETED,
-          amount: dto.amount,
-          balanceBefore: wallet.balance,
-          balanceAfter: updatedWallet.balance,
-          description: dto.reason,
-          metadata: { adminId },
-        },
-      });
-
-      // Log admin action
-      await tx.adminAction.create({
-        data: {
-          actorId: adminId,
-          targetId: targetUserId,
-          action: 'WALLET_ADJUSTED',
-          details: {
+        await tx.walletTransaction.create({
+          data: {
+            walletId: wallet.id,
+            type: TransactionType.ADMIN_ADJUSTMENT,
+            status: TransactionStatus.COMPLETED,
             amount: dto.amount,
-            reason: dto.reason,
             balanceBefore: wallet.balance,
             balanceAfter: updatedWallet.balance,
+            description: dto.reason,
+            metadata: { adminId },
           },
-        },
-      });
+        });
 
-      return updatedWallet;
-    });
+        // Log admin action
+        await tx.adminAction.create({
+          data: {
+            actorId: adminId,
+            targetId: targetUserId,
+            action: "WALLET_ADJUSTED",
+            details: {
+              amount: dto.amount,
+              reason: dto.reason,
+              balanceBefore: wallet.balance,
+              balanceAfter: updatedWallet.balance,
+            },
+          },
+        });
 
-    this.logger.log(`Admin ${adminId} adjusted balance for ${targetUserId}: ${dto.amount}`);
+        return updatedWallet;
+      },
+    );
+
+    this.logger.log(
+      `Admin ${adminId} adjusted balance for ${targetUserId}: ${dto.amount}`,
+    );
 
     return {
       success: true,
@@ -352,7 +376,7 @@ export class WalletsService {
     });
 
     if (!wallet) {
-      throw new NotFoundException('المحفظة غير موجودة');
+      throw new NotFoundException("المحفظة غير موجودة");
     }
 
     const [

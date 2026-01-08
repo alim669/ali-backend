@@ -2,27 +2,20 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  // إضافة 1000000 عملة لجميع المحفظات
-  const result = await prisma.wallet.updateMany({
-    data: {
-      balance: 1000000,
-      diamonds: 10000,
-    }
+  // عرض جميع المستخدمين
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    include: { wallet: true }
   });
   
-  console.log(`✅ تم تحديث ${result.count} محفظة بـ 1,000,000 عملة و 10,000 ماسة`);
-  
-  // عرض النتيجة
-  const wallets = await prisma.wallet.findMany({
-    include: { user: { select: { email: true, username: true } } }
-  });
-  
-  console.log('\nالمحفظات:');
-  wallets.forEach(w => {
-    console.log(`- ${w.user.email} (${w.user.username}): ${w.balance} coins, ${w.diamonds} diamonds`);
+  console.log('المستخدمون في قاعدة البيانات:');
+  users.forEach(u => {
+    const walletInfo = u.wallet ? `${u.wallet.balance} coins` : 'لا محفظة';
+    console.log(`- ${u.email} (${u.username}) - ${walletInfo}`);
   });
 }
 
 main()
-  .catch(e => console.error(e))
+  .catch(e => console.error('❌ خطأ:', e.message))
   .finally(() => prisma.$disconnect());

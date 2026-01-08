@@ -3,50 +3,48 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-// جدول العداد للـ ID المتسلسل (احتياطي - لم يعد مستخدماً)
-model Counter {
-  id        String   @id @default("user_id_counter")
-  value     BigInt   @default(100000000) // يبدأ من 100 مليون
-  updatedAt DateTime @updatedAt
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 model User {
-  id              String         @id @default(uuid())
-  numericId       BigInt         @unique @default(autoincrement()) // ID الرقمي - يبدأ من 100 مليون
-  email           String         @unique
-  passwordHash    String?
-  googleId        String?        @unique
-  authProvider    AuthProvider   @default(EMAIL)
-  username        String         @unique
-  displayName     String
-  avatar          String?
-  bio             String?
-  role            UserRole       @default(USER)
-  status          UserStatus     @default(ACTIVE)
-  emailVerified   Boolean        @default(false)
-  lastLoginAt     DateTime?
-  lastLoginIp     String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  adminActions    AdminAction[]  @relation("AdminActor")
-  actionsReceived AdminAction[]  @relation("AdminTarget")
-  following       Follow[]       @relation("Follower")
-  followers       Follow[]       @relation("Following")
-  giftsReceived   GiftSend[]     @relation("GiftReceiver")
-  giftsSent       GiftSend[]     @relation("GiftSender")
-  sentMessages    Message[]      @relation("MessageSender")
-  notifications   Notification[]
-  refreshTokens   RefreshToken[]
-  reportsReceived Report[]       @relation("ReportedUser")
-  reportsMade     Report[]       @relation("Reporter")
-  reportsResolved Report[]       @relation("ReportResolver")
-  ownedRooms      Room[]         @relation("RoomOwner")
-  roomMemberships RoomMember[]
-  wallet          Wallet?
+  id                                                 String            @id @default(uuid())
+  numericId                                          BigInt            @unique @default(autoincrement())
+  email                                              String            @unique
+  passwordHash                                       String?
+  googleId                                           String?           @unique
+  authProvider                                       AuthProvider      @default(EMAIL)
+  username                                           String            @unique
+  displayName                                        String
+  avatar                                             String?
+  bio                                                String?
+  role                                               UserRole          @default(USER)
+  status                                             UserStatus        @default(ACTIVE)
+  emailVerified                                      Boolean           @default(false)
+  lastLoginAt                                        DateTime?
+  lastLoginIp                                        String?
+  createdAt                                          DateTime          @default(now())
+  updatedAt                                          DateTime          @updatedAt
+  adminActions                                       AdminAction[]     @relation("AdminActor")
+  actionsReceived                                    AdminAction[]     @relation("AdminTarget")
+  following                                          Follow[]          @relation("Follower")
+  followers                                          Follow[]          @relation("Following")
+  giftsReceived                                      GiftSend[]        @relation("GiftReceiver")
+  giftsSent                                          GiftSend[]        @relation("GiftSender")
+  sentMessages                                       Message[]         @relation("MessageSender")
+  notifications                                      Notification[]
+  refreshTokens                                      RefreshToken[]
+  reportsReceived                                    Report[]          @relation("ReportedUser")
+  reportsMade                                        Report[]          @relation("Reporter")
+  reportsResolved                                    Report[]          @relation("ReportResolver")
+  ownedRooms                                         Room[]            @relation("RoomOwner")
+  roomMemberships                                    RoomMember[]
+  wallet                                             Wallet?
+  friend_requests_friend_requests_from_user_idToUser friend_requests[] @relation("friend_requests_from_user_idToUser")
+  friend_requests_friend_requests_to_user_idToUser   friend_requests[] @relation("friend_requests_to_user_idToUser")
+  friendships_friendships_user1_idToUser             friendships[]     @relation("friendships_user1_idToUser")
+  friendships_friendships_user2_idToUser             friendships[]     @relation("friendships_user2_idToUser")
 
   @@index([email])
   @@index([googleId])
@@ -307,6 +305,73 @@ model Report {
   @@index([createdAt])
 }
 
+model AgentRequest {
+  id              String             @id @default(uuid())
+  userId          String
+  fullName        String
+  country         String
+  province        String
+  region          String
+  email           String
+  phone           String
+  message         String?
+  status          AgentRequestStatus @default(PENDING)
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  expiresAt       DateTime           @default(dbgenerated("(now() + '7 days'::interval)"))
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Agent {
+  id        String      @id @default(uuid())
+  userId    String      @unique
+  fullName  String
+  country   String
+  province  String
+  region    String
+  phone     String
+  status    AgentStatus @default(ACTIVE)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([status])
+  @@index([country])
+}
+
+model friend_requests {
+  id                                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  from_user_id                            String
+  to_user_id                              String
+  status                                  String?   @default("pending") @db.VarChar(20)
+  created_at                              DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                              DateTime? @default(now()) @db.Timestamp(6)
+  User_friend_requests_from_user_idToUser User      @relation("friend_requests_from_user_idToUser", fields: [from_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User_friend_requests_to_user_idToUser   User      @relation("friend_requests_to_user_idToUser", fields: [to_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([from_user_id, to_user_id])
+  @@index([from_user_id, status], map: "idx_friend_requests_from_user")
+  @@index([to_user_id, status], map: "idx_friend_requests_to_user")
+}
+
+model friendships {
+  id                              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user1_id                        String
+  user2_id                        String
+  created_at                      DateTime? @default(now()) @db.Timestamp(6)
+  User_friendships_user1_idToUser User      @relation("friendships_user1_idToUser", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User_friendships_user2_idToUser User      @relation("friendships_user2_idToUser", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user1_id, user2_id])
+  @@index([user1_id], map: "idx_friendships_user1")
+  @@index([user2_id], map: "idx_friendships_user2")
+}
+
 enum UserRole {
   USER
   MODERATOR
@@ -412,4 +477,16 @@ enum ReportStatus {
   REVIEWING
   RESOLVED
   DISMISSED
+}
+
+enum AgentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
 }

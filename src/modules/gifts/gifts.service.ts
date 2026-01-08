@@ -4,19 +4,24 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
-} from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { CacheService, CACHE_TTL } from '../../common/cache/cache.service';
-import { MessagesService } from '../messages/messages.service';
+} from "@nestjs/common";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { CacheService, CACHE_TTL } from "../../common/cache/cache.service";
+import { MessagesService } from "../messages/messages.service";
 import {
   CreateGiftDto,
   UpdateGiftDto,
   SendGiftDto,
   GiftQueryDto,
-} from './dto/gifts.dto';
-import { TransactionType, TransactionStatus, Prisma, User } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
+} from "./dto/gifts.dto";
+import {
+  TransactionType,
+  TransactionStatus,
+  Prisma,
+  User,
+} from "@prisma/client";
+import { v4 as uuidv4 } from "uuid";
 
 @Injectable()
 export class GiftsService {
@@ -55,7 +60,7 @@ export class GiftsService {
 
     const where: any = {};
 
-    if (typeof isActive === 'boolean') {
+    if (typeof isActive === "boolean") {
       where.isActive = isActive;
     }
 
@@ -66,7 +71,7 @@ export class GiftsService {
     const [gifts, total] = await Promise.all([
       this.prisma.gift.findMany({
         where,
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
         skip,
         take: limit,
       }),
@@ -99,7 +104,7 @@ export class GiftsService {
     });
 
     if (!gift) {
-      throw new NotFoundException('الهدية غير موجودة');
+      throw new NotFoundException("الهدية غير موجودة");
     }
 
     return gift;
@@ -153,7 +158,7 @@ export class GiftsService {
 
     this.logger.log(`Gift deactivated: ${id}`);
 
-    return { message: 'تم إلغاء تفعيل الهدية' };
+    return { message: "تم إلغاء تفعيل الهدية" };
   }
 
   // ================================
@@ -168,14 +173,14 @@ export class GiftsService {
 
     if (existingSend) {
       this.logger.warn(`Duplicate gift send attempt: ${idempotencyKey}`);
-      throw new ConflictException('تم إرسال هذه الهدية مسبقاً');
+      throw new ConflictException("تم إرسال هذه الهدية مسبقاً");
     }
 
     // Also check in Redis for recent sends (faster)
     const redisKey = `gift:idempotency:${idempotencyKey}`;
     const exists = await this.redis.exists(redisKey);
     if (exists) {
-      throw new ConflictException('تم إرسال هذه الهدية مسبقاً');
+      throw new ConflictException("تم إرسال هذه الهدية مسبقاً");
     }
 
     // Get gift
@@ -184,7 +189,7 @@ export class GiftsService {
     });
 
     if (!gift || !gift.isActive) {
-      throw new NotFoundException('الهدية غير موجودة أو غير متاحة');
+      throw new NotFoundException("الهدية غير موجودة أو غير متاحة");
     }
 
     // Validate receiver exists
@@ -193,126 +198,129 @@ export class GiftsService {
     });
 
     if (!receiver) {
-      throw new NotFoundException('المستلم غير موجود');
+      throw new NotFoundException("المستلم غير موجود");
     }
 
     // Cannot send to yourself
     if (senderId === dto.receiverId) {
-      throw new BadRequestException('لا يمكنك إرسال هدية لنفسك');
+      throw new BadRequestException("لا يمكنك إرسال هدية لنفسك");
     }
 
     const quantity = dto.quantity || 1;
     const totalPrice = gift.price * quantity;
 
     // Execute in transaction
-    const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Get sender wallet with lock (SELECT FOR UPDATE)
-      const senderWallet = await tx.wallet.findUnique({
-        where: { userId: senderId },
-      });
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // Get sender wallet with lock (SELECT FOR UPDATE)
+        const senderWallet = await tx.wallet.findUnique({
+          where: { userId: senderId },
+        });
 
-      if (!senderWallet) {
-        throw new BadRequestException('المحفظة غير موجودة');
-      }
+        if (!senderWallet) {
+          throw new BadRequestException("المحفظة غير موجودة");
+        }
 
-      if (senderWallet.balance < totalPrice) {
-        throw new BadRequestException('رصيد غير كافي');
-      }
+        if (senderWallet.balance < totalPrice) {
+          throw new BadRequestException("رصيد غير كافي");
+        }
 
-      // Get receiver wallet
-      let receiverWallet = await tx.wallet.findUnique({
-        where: { userId: dto.receiverId },
-      });
+        // Get receiver wallet
+        let receiverWallet = await tx.wallet.findUnique({
+          where: { userId: dto.receiverId },
+        });
 
-      if (!receiverWallet) {
-        // Create wallet if doesn't exist
-        receiverWallet = await tx.wallet.create({
+        if (!receiverWallet) {
+          // Create wallet if doesn't exist
+          receiverWallet = await tx.wallet.create({
+            data: {
+              userId: dto.receiverId,
+              balance: 0,
+              diamonds: 0,
+            },
+          });
+        }
+
+        // Calculate receiver amount (e.g., 80% of gift value)
+        const receiverAmount = Math.floor(totalPrice * 0.8);
+
+        // Deduct from sender
+        const updatedSenderWallet = await tx.wallet.update({
+          where: { id: senderWallet.id },
           data: {
-            userId: dto.receiverId,
-            balance: 0,
-            diamonds: 0,
+            balance: { decrement: totalPrice },
+            version: { increment: 1 },
           },
         });
-      }
 
-      // Calculate receiver amount (e.g., 80% of gift value)
-      const receiverAmount = Math.floor(totalPrice * 0.8);
+        // Add to receiver
+        const updatedReceiverWallet = await tx.wallet.update({
+          where: { id: receiverWallet.id },
+          data: {
+            balance: { increment: receiverAmount },
+            version: { increment: 1 },
+          },
+        });
 
-      // Deduct from sender
-      const updatedSenderWallet = await tx.wallet.update({
-        where: { id: senderWallet.id },
-        data: {
-          balance: { decrement: totalPrice },
-          version: { increment: 1 },
-        },
-      });
+        // Create gift send record
+        const giftSend = await tx.giftSend.create({
+          data: {
+            idempotencyKey,
+            giftId: dto.giftId,
+            senderId,
+            receiverId: dto.receiverId,
+            roomId: dto.roomId,
+            quantity,
+            totalPrice,
+            message: dto.message,
+          },
+        });
 
-      // Add to receiver
-      const updatedReceiverWallet = await tx.wallet.update({
-        where: { id: receiverWallet.id },
-        data: {
-          balance: { increment: receiverAmount },
-          version: { increment: 1 },
-        },
-      });
+        // Create sender transaction (debit)
+        await tx.walletTransaction.create({
+          data: {
+            walletId: senderWallet.id,
+            type: TransactionType.GIFT_SENT,
+            status: TransactionStatus.COMPLETED,
+            amount: -totalPrice,
+            balanceBefore: senderWallet.balance,
+            balanceAfter: updatedSenderWallet.balance,
+            referenceType: "gift_send",
+            referenceId: giftSend.id,
+            description: `إرسال هدية "${gift.name}" إلى ${receiver.displayName}`,
+          },
+        });
 
-      // Create gift send record
-      const giftSend = await tx.giftSend.create({
-        data: {
-          idempotencyKey,
-          giftId: dto.giftId,
-          senderId,
-          receiverId: dto.receiverId,
-          roomId: dto.roomId,
-          quantity,
-          totalPrice,
-          message: dto.message,
-        },
-      });
+        // Create receiver transaction (credit)
+        await tx.walletTransaction.create({
+          data: {
+            walletId: receiverWallet.id,
+            type: TransactionType.GIFT_RECEIVED,
+            status: TransactionStatus.COMPLETED,
+            amount: receiverAmount,
+            balanceBefore: receiverWallet.balance,
+            balanceAfter: updatedReceiverWallet.balance,
+            referenceType: "gift_send",
+            referenceId: giftSend.id,
+            description: `استلام هدية "${gift.name}"`,
+          },
+        });
 
-      // Create sender transaction (debit)
-      await tx.walletTransaction.create({
-        data: {
-          walletId: senderWallet.id,
-          type: TransactionType.GIFT_SENT,
-          status: TransactionStatus.COMPLETED,
-          amount: -totalPrice,
-          balanceBefore: senderWallet.balance,
-          balanceAfter: updatedSenderWallet.balance,
-          referenceType: 'gift_send',
-          referenceId: giftSend.id,
-          description: `إرسال هدية "${gift.name}" إلى ${receiver.displayName}`,
-        },
-      });
-
-      // Create receiver transaction (credit)
-      await tx.walletTransaction.create({
-        data: {
-          walletId: receiverWallet.id,
-          type: TransactionType.GIFT_RECEIVED,
-          status: TransactionStatus.COMPLETED,
-          amount: receiverAmount,
-          balanceBefore: receiverWallet.balance,
-          balanceAfter: updatedReceiverWallet.balance,
-          referenceType: 'gift_send',
-          referenceId: giftSend.id,
-          description: `استلام هدية "${gift.name}"`,
-        },
-      });
-
-      return {
-        giftSend,
-        senderBalance: updatedSenderWallet.balance,
-        gift,
-      };
-    });
+        return {
+          giftSend,
+          senderBalance: updatedSenderWallet.balance,
+          gift,
+        };
+      },
+    );
 
     // Store idempotency key in Redis (expires after 24 hours)
-    await this.redis.set(redisKey, '1', 86400);
+    await this.redis.set(redisKey, "1", 86400);
 
     // Create gift message in room if roomId provided
     if (dto.roomId) {
-      const messageContent = dto.message || `أرسل هدية "${result.gift.name}" 🎁`;
+      const messageContent =
+        dto.message || `أرسل هدية "${result.gift.name}" 🎁`;
       await this.messagesService.createGiftMessage(
         dto.roomId,
         senderId,
@@ -322,8 +330,8 @@ export class GiftsService {
     }
 
     // Publish gift event for WebSocket
-    await this.redis.publish('gifts:sent', {
-      type: 'gift_sent',
+    await this.redis.publish("gifts:sent", {
+      type: "gift_sent",
       data: {
         giftSend: result.giftSend,
         gift: result.gift,
@@ -333,7 +341,9 @@ export class GiftsService {
       },
     });
 
-    this.logger.log(`Gift sent: ${result.giftSend.id} from ${senderId} to ${dto.receiverId}`);
+    this.logger.log(
+      `Gift sent: ${result.giftSend.id} from ${senderId} to ${dto.receiverId}`,
+    );
 
     return {
       success: true,
@@ -370,7 +380,7 @@ export class GiftsService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -411,7 +421,7 @@ export class GiftsService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -428,13 +438,16 @@ export class GiftsService {
   // GET GIFT LEADERBOARD
   // ================================
 
-  async getLeaderboard(type: 'senders' | 'receivers' = 'senders', limit: number = 10) {
-    if (type === 'senders') {
+  async getLeaderboard(
+    type: "senders" | "receivers" = "senders",
+    limit: number = 10,
+  ) {
+    if (type === "senders") {
       const result = await this.prisma.giftSend.groupBy({
-        by: ['senderId'],
+        by: ["senderId"],
         _sum: { totalPrice: true },
         _count: { id: true },
-        orderBy: { _sum: { totalPrice: 'desc' } },
+        orderBy: { _sum: { totalPrice: "desc" } },
         take: limit,
       });
 
@@ -450,17 +463,23 @@ export class GiftsService {
         },
       });
 
-      return result.map((r: { senderId: string; _sum: { totalPrice: number | null }; _count: { id: number } }) => ({
-        user: users.find((u: { id: string }) => u.id === r.senderId),
-        totalSpent: r._sum.totalPrice,
-        giftsSent: r._count.id,
-      }));
+      return result.map(
+        (r: {
+          senderId: string;
+          _sum: { totalPrice: number | null };
+          _count: { id: number };
+        }) => ({
+          user: users.find((u: { id: string }) => u.id === r.senderId),
+          totalSpent: r._sum.totalPrice,
+          giftsSent: r._count.id,
+        }),
+      );
     } else {
       const result = await this.prisma.giftSend.groupBy({
-        by: ['receiverId'],
+        by: ["receiverId"],
         _sum: { totalPrice: true },
         _count: { id: true },
-        orderBy: { _sum: { totalPrice: 'desc' } },
+        orderBy: { _sum: { totalPrice: "desc" } },
         take: limit,
       });
 
@@ -475,11 +494,17 @@ export class GiftsService {
         },
       });
 
-      return result.map((r: { receiverId: string; _sum: { totalPrice: number | null }; _count: { id: number } }) => ({
-        user: users.find((u: { id: string }) => u.id === r.receiverId),
-        totalReceived: r._sum.totalPrice,
-        giftsReceived: r._count.id,
-      }));
+      return result.map(
+        (r: {
+          receiverId: string;
+          _sum: { totalPrice: number | null };
+          _count: { id: number };
+        }) => ({
+          user: users.find((u: { id: string }) => u.id === r.receiverId),
+          totalReceived: r._sum.totalPrice,
+          giftsReceived: r._count.id,
+        }),
+      );
     }
   }
 }

@@ -7,17 +7,17 @@ import {
   Min,
   Max,
   MaxLength,
-} from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { GiftType } from '@prisma/client';
+} from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { GiftType } from "@prisma/client";
 
 export class CreateGiftDto {
-  @ApiProperty({ example: 'وردة حمراء' })
+  @ApiProperty({ example: "وردة حمراء" })
   @IsString()
   @MaxLength(100)
   name: string;
 
-  @ApiPropertyOptional({ example: 'وردة جميلة تعبر عن الحب' })
+  @ApiPropertyOptional({ example: "وردة جميلة تعبر عن الحب" })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -27,16 +27,16 @@ export class CreateGiftDto {
   @IsEnum(GiftType)
   type: GiftType;
 
-  @ApiProperty({ example: 'https://cdn.example.com/gifts/rose.png' })
+  @ApiProperty({ example: "https://cdn.example.com/gifts/rose.png" })
   @IsString()
   imageUrl: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/gifts/rose.json' })
+  @ApiPropertyOptional({ example: "https://cdn.example.com/gifts/rose.json" })
   @IsOptional()
   @IsString()
   animationUrl?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/gifts/rose.mp4' })
+  @ApiPropertyOptional({ example: "https://cdn.example.com/gifts/rose.mp4" })
   @IsOptional()
   @IsString()
   videoUrl?: string;
@@ -97,15 +97,15 @@ export class UpdateGiftDto {
 }
 
 export class SendGiftDto {
-  @ApiProperty({ description: 'معرف الهدية' })
-  @IsUUID()
+  @ApiProperty({ description: "معرف الهدية" })
+  @IsString()
   giftId: string;
 
-  @ApiProperty({ description: 'معرف المستلم' })
+  @ApiProperty({ description: "معرف المستلم" })
   @IsUUID()
   receiverId: string;
 
-  @ApiPropertyOptional({ description: 'معرف الغرفة (اختياري)' })
+  @ApiPropertyOptional({ description: "معرف الغرفة (اختياري)" })
   @IsOptional()
   @IsUUID()
   roomId?: string;
@@ -117,7 +117,7 @@ export class SendGiftDto {
   @Max(100)
   quantity?: number = 1;
 
-  @ApiPropertyOptional({ example: 'هدية من القلب!' })
+  @ApiPropertyOptional({ example: "هدية من القلب!" })
   @IsOptional()
   @IsString()
   @MaxLength(200)

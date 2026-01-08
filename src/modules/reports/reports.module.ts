@@ -2,10 +2,10 @@
  * Reports Module - نظام البلاغات
  */
 
-import { Module } from '@nestjs/common';
-import { ReportsController } from './reports.controller';
-import { ReportsService } from './reports.service';
-import { PrismaModule } from '../../common/prisma/prisma.module';
+import { Module } from "@nestjs/common";
+import { ReportsController } from "./reports.controller";
+import { ReportsService } from "./reports.service";
+import { PrismaModule } from "../../common/prisma/prisma.module";
 
 @Module({
   imports: [PrismaModule],

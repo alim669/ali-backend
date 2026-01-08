@@ -1,25 +1,16 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
-import { PrismaService } from '../../common/prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
-import { CacheService } from '../../common/cache/cache.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
+import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
+import { PrismaService } from "../../common/prisma/prisma.service";
+import { RedisService } from "../../common/redis/redis.service";
+import { CacheService } from "../../common/cache/cache.service";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { RolesGuard } from "../auth/guards/roles.guard";
+import { Roles } from "../auth/decorators/roles.decorator";
 
-@ApiTags('admin')
-@Controller('admin')
+@ApiTags("admin")
+@Controller("admin")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'SUPER_ADMIN')
+@Roles("ADMIN", "SUPER_ADMIN")
 @ApiBearerAuth()
 export class AdminController {
   constructor(
@@ -28,8 +19,8 @@ export class AdminController {
     private cache: CacheService,
   ) {}
 
-  @Get('dashboard')
-  @ApiOperation({ summary: 'إحصائيات لوحة التحكم' })
+  @Get("dashboard")
+  @ApiOperation({ summary: "إحصائيات لوحة التحكم" })
   async getDashboard() {
     const [
       totalUsers,
@@ -42,10 +33,10 @@ export class AdminController {
       totalGiftValue,
     ] = await Promise.all([
       this.prisma.user.count(),
-      this.prisma.user.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.user.count({ where: { status: 'BANNED' } }),
+      this.prisma.user.count({ where: { status: "ACTIVE" } }),
+      this.prisma.user.count({ where: { status: "BANNED" } }),
       this.prisma.room.count(),
-      this.prisma.room.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.room.count({ where: { status: "ACTIVE" } }),
       this.prisma.message.count(),
       this.prisma.giftSend.count(),
       this.prisma.giftSend.aggregate({ _sum: { totalPrice: true } }),
@@ -55,11 +46,7 @@ export class AdminController {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const [
-      newUsersToday,
-      messagestoday,
-      giftsToday,
-    ] = await Promise.all([
+    const [newUsersToday, messagestoday, giftsToday] = await Promise.all([
       this.prisma.user.count({ where: { createdAt: { gte: today } } }),
       this.prisma.message.count({ where: { createdAt: { gte: today } } }),
       this.prisma.giftSend.count({ where: { createdAt: { gte: today } } }),
@@ -88,12 +75,12 @@ export class AdminController {
     };
   }
 
-  @Get('actions')
-  @ApiOperation({ summary: 'سجل إجراءات المسؤولين' })
+  @Get("actions")
+  @ApiOperation({ summary: "سجل إجراءات المسؤولين" })
   async getAdminActions(
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 50,
-  ) {
+    @Query("page") page: number = 1,
+    @Query("limit") limit: number = 50,
+  ): Promise<any> {
     const skip = (page - 1) * limit;
 
     const [actions, total] = await Promise.all([
@@ -114,7 +101,7 @@ export class AdminController {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         skip,
         take: limit,
       }),
@@ -127,12 +114,12 @@ export class AdminController {
     };
   }
 
-  @Get('online')
-  @ApiOperation({ summary: 'المستخدمين المتصلين' })
+  @Get("online")
+  @ApiOperation({ summary: "المستخدمين المتصلين" })
   async getOnlineUsers() {
     // This is a simplified version - in production you'd scan Redis keys
     const client = this.redis.getClient();
-    const keys = client ? await client.keys('presence:user:*') : [];
+    const keys = client ? await client.keys("presence:user:*") : [];
     const onlineCount = keys.length;
 
     return {
@@ -141,15 +128,15 @@ export class AdminController {
     };
   }
 
-  @Get('revenue')
-  @ApiOperation({ summary: 'تقرير الإيرادات' })
+  @Get("revenue")
+  @ApiOperation({ summary: "تقرير الإيرادات" })
   async getRevenue(
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
+    @Query("startDate") startDate?: string,
+    @Query("endDate") endDate?: string,
   ) {
     const where: any = {
-      type: { in: ['DEPOSIT', 'PURCHASE'] },
-      status: 'COMPLETED',
+      type: { in: ["DEPOSIT", "PURCHASE"] },
+      status: "COMPLETED",
     };
 
     if (startDate || endDate) {
@@ -185,11 +172,11 @@ export class AdminController {
     };
   }
 
-  @Get('system/health')
-  @ApiOperation({ summary: 'حالة النظام' })
+  @Get("system/health")
+  @ApiOperation({ summary: "حالة النظام" })
   async getSystemHealth() {
     const health: any = {
-      status: 'healthy',
+      status: "healthy",
       timestamp: new Date().toISOString(),
       services: {},
     };
@@ -197,10 +184,10 @@ export class AdminController {
     // Check PostgreSQL
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      health.services.postgres = { status: 'up' };
+      health.services.postgres = { status: "up" };
     } catch (error) {
-      health.services.postgres = { status: 'down', error: error.message };
-      health.status = 'unhealthy';
+      health.services.postgres = { status: "down", error: error.message };
+      health.status = "unhealthy";
     }
 
     // Check Redis
@@ -208,13 +195,16 @@ export class AdminController {
       const client = this.redis.getClient();
       if (client) {
         await client.ping();
-        health.services.redis = { status: 'up' };
+        health.services.redis = { status: "up" };
       } else {
-        health.services.redis = { status: 'disabled', message: 'Using in-memory fallback' };
+        health.services.redis = {
+          status: "disabled",
+          message: "Using in-memory fallback",
+        };
       }
     } catch (error) {
-      health.services.redis = { status: 'down', error: error.message };
-      health.status = 'unhealthy';
+      health.services.redis = { status: "down", error: error.message };
+      health.status = "unhealthy";
     }
 
     // Cache stats
@@ -223,8 +213,8 @@ export class AdminController {
     return health;
   }
 
-  @Get('cache/stats')
-  @ApiOperation({ summary: 'إحصائيات الـ Cache' })
+  @Get("cache/stats")
+  @ApiOperation({ summary: "إحصائيات الـ Cache" })
   async getCacheStats() {
     return {
       ...this.cache.getStats(),

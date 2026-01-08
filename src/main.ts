@@ -78,7 +78,7 @@ async function bootstrap() {
       .setVersion("1.0")
       .addBearerAuth()
       .addServer(`http://localhost:${port}`, "Local Development")
-      .addServer("http://64.226.115.148", "Production Server")
+      .addServer("http://167.235.64.220", "Production Server (Hetzner)")
       .addTag("auth", "Authentication & Authorization")
       .addTag("users", "User Management")
       .addTag("rooms", "Voice/Chat Rooms")

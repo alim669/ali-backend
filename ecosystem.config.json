@@ -33,7 +33,7 @@
   "deploy": {
     "production": {
       "user": "deploy",
-      "host": ["64.226.115.148"],
+      "host": ["167.235.64.220"],
       "ref": "origin/main",
       "repo": "git@github.com:username/ali-backend.git",
       "path": "/var/www/ali-backend",

@@ -23,7 +23,7 @@ export class UploadService {
     );
     this.baseUrl = this.configService.get<string>(
       "BASE_URL",
-      "http://64.226.115.148",
+      "http://167.235.64.220",
     );
 
     // Create upload directories

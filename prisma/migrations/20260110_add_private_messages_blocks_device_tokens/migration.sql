@@ -117,3 +117,46 @@ DO $$ BEGIN
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
+
+-- ============================================================
+-- Additional Performance Indexes (Schema Update 2)
+-- ============================================================
+
+-- Index for VIP expiration check on User
+CREATE INDEX IF NOT EXISTS "User_isVIP_vipExpiresAt_idx" ON "User"("isVIP", "vipExpiresAt");
+
+-- Index for auto-unban on RoomMember
+CREATE INDEX IF NOT EXISTS "RoomMember_isBanned_bannedUntil_idx" ON "RoomMember"("isBanned", "bannedUntil");
+CREATE INDEX IF NOT EXISTS "RoomMember_isMuted_mutedUntil_idx" ON "RoomMember"("isMuted", "mutedUntil");
+
+-- Index for soft-deleted messages
+CREATE INDEX IF NOT EXISTS "Message_isDeleted_idx" ON "Message"("isDeleted");
+
+-- Index for notification type filtering
+CREATE INDEX IF NOT EXISTS "Notification_type_idx" ON "Notification"("type");
+
+-- Index for AgentRequest expiry
+CREATE INDEX IF NOT EXISTS "AgentRequest_expiresAt_idx" ON "AgentRequest"("expiresAt");
+
+-- Index for Agent createdAt
+CREATE INDEX IF NOT EXISTS "Agent_createdAt_idx" ON "Agent"("createdAt");
+
+-- ============================================================
+-- Add Foreign Keys for Agent and AgentRequest (if not exists)
+-- ============================================================
+
+-- AgentRequest -> User relationship
+DO $$ BEGIN
+    ALTER TABLE "AgentRequest" ADD CONSTRAINT "AgentRequest_userId_fkey" 
+    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Agent -> User relationship
+DO $$ BEGIN
+    ALTER TABLE "Agent" ADD CONSTRAINT "Agent_userId_fkey" 
+    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;

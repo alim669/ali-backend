@@ -55,6 +55,9 @@ model User {
   blockedByUsers                                     UserBlock[]       @relation("Blocked")
   // Device Tokens
   deviceTokens                                       DeviceToken[]
+  // Agent Relations
+  agentRequests                                      AgentRequest[]
+  agent                                              Agent?
 
   @@index([email])
   @@index([googleId])
@@ -62,6 +65,7 @@ model User {
   @@index([status])
   @@index([createdAt])
   @@index([numericId])
+  @@index([isVIP, vipExpiresAt])
 }
 
 model RefreshToken {
@@ -124,6 +128,8 @@ model RoomMember {
   @@index([roomId])
   @@index([userId])
   @@index([role])
+  @@index([isBanned, bannedUntil])
+  @@index([isMuted, mutedUntil])
 }
 
 model Message {
@@ -147,6 +153,7 @@ model Message {
   @@index([senderId])
   @@index([createdAt])
   @@index([roomId, createdAt])
+  @@index([isDeleted])
 }
 
 model Gift {
@@ -274,6 +281,7 @@ model Notification {
   @@index([userId])
   @@index([userId, isRead])
   @@index([createdAt])
+  @@index([type])
 }
 
 model Follow {
@@ -332,10 +340,12 @@ model AgentRequest {
   expiresAt       DateTime           @default(dbgenerated("(now() + '7 days'::interval)"))
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([expiresAt])
 }
 
 model Agent {
@@ -349,9 +359,11 @@ model Agent {
   status    AgentStatus @default(ACTIVE)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([country])
+  @@index([createdAt])
 }
 
 model friend_requests {
@@ -551,13 +563,13 @@ enum PrivateMessageStatus {
 // ================================
 
 model UserBlock {
-  id          String   @id @default(uuid())
-  blockerId   String
-  blockedId   String
-  reason      String?
-  createdAt   DateTime @default(now())
-  blocker     User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-  blocked     User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  reason    String?
+  createdAt DateTime @default(now())
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
 
   @@unique([blockerId, blockedId])
   @@index([blockerId])

@@ -4,6 +4,12 @@ import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import {
+  LoggingInterceptor,
+  TransformInterceptor,
+  TimeoutInterceptor,
+} from "./common/interceptors";
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
@@ -61,6 +67,16 @@ async function bootstrap() {
         value: false,
       },
     }),
+  );
+
+  // Global Exception Filter
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // Global Interceptors
+  app.useGlobalInterceptors(
+    new TimeoutInterceptor(),
+    new LoggingInterceptor(),
+    new TransformInterceptor(),
   );
 
   // API Prefix and Versioning

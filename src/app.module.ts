@@ -11,6 +11,7 @@ import { UploadModule } from "./common/upload/upload.module";
 import { FirebaseModule } from "./common/firebase/firebase.module";
 import { SecurityModule } from "./common/security/security.module";
 import { MonitoringModule } from "./common/monitoring/monitoring.module";
+import { CleanupModule } from "./common/cleanup/cleanup.module";
 import { SecurityMiddleware } from "./common/security/middleware/security.middleware";
 import { LoggingInterceptor } from "./common/monitoring/interceptors/logging.interceptor";
 import { PerformanceInterceptor } from "./common/monitoring/interceptors/performance.interceptor";
@@ -30,6 +31,8 @@ import { FriendsModule } from "./modules/friends/friends.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { HealthModule } from "./modules/health/health.module";
 import { AgentsModule } from "./modules/agents/agents.module";
+import { VIPModule } from "./modules/vip/vip.module";
+import { ScheduledTasksModule } from "./common/scheduled/scheduled-tasks.module";
 
 // Guards
 import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
@@ -92,6 +95,9 @@ import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
     ReportsModule,
     HealthModule,
     AgentsModule,
+    VIPModule,
+    CleanupModule,
+    ScheduledTasksModule,
   ],
   providers: [
     // Global Auth Guard

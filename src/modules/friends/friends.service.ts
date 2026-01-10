@@ -67,12 +67,25 @@ export class FriendsService {
    * إرسال طلب صداقة
    */
   async sendFriendRequest(fromUserId: string, toUserId: string) {
+    console.log(`👥 sendFriendRequest: fromUserId=${fromUserId}, toUserId=${toUserId}`);
+    
     if (fromUserId === toUserId) {
       throw new BadRequestException("لا يمكنك إرسال طلب صداقة لنفسك");
     }
 
     const client = await this.pool.connect();
     try {
+      // التحقق أولاً من وجود المستخدم المستلم
+      const receiverCheck = await client.query(
+        `SELECT id FROM "User" WHERE id = $1`,
+        [toUserId],
+      );
+      
+      if (receiverCheck.rows.length === 0) {
+        console.log(`❌ User not found: ${toUserId}`);
+        throw new NotFoundException("المستخدم غير موجود");
+      }
+      
       // التحقق من عدم وجود صداقة مسبقة
       const existingFriendship = await client.query(
         `
@@ -146,7 +159,7 @@ export class FriendsService {
       // البحث عن المستخدم بالـ Custom ID
       const userResult = await client.query(
         `
-        SELECT id FROM users WHERE numeric_id = $1
+        SELECT id FROM "User" WHERE "numericId" = $1
       `,
         [customId],
       );
@@ -261,18 +274,18 @@ export class FriendsService {
             ELSE f.user1_id 
           END as friend_id,
           u.username,
-          u.display_name as name,
+          u."displayName" as name,
           u.avatar,
-          u.numeric_id as custom_id,
+          u."numericId" as custom_id,
           u.status = 'ACTIVE' as is_online,
           f.created_at
         FROM friendships f
-        JOIN users u ON u.id = CASE 
+        JOIN "User" u ON u.id = CASE 
           WHEN f.user1_id = $1 THEN f.user2_id 
           ELSE f.user1_id 
         END
         WHERE f.user1_id = $1 OR f.user2_id = $1
-        ORDER BY u.display_name
+        ORDER BY u."displayName"
       `,
         [userId],
       );
@@ -299,11 +312,11 @@ export class FriendsService {
           fr.from_user_id,
           fr.created_at,
           u.username,
-          u.display_name,
+          u."displayName" as display_name,
           u.avatar as photo_url,
-          u.numeric_id as custom_id
+          u."numericId" as custom_id
         FROM friend_requests fr
-        JOIN users u ON u.id = fr.from_user_id
+        JOIN "User" u ON u.id = fr.from_user_id
         WHERE fr.to_user_id = $1 AND fr.status = 'pending'
         ORDER BY fr.created_at DESC
       `,
@@ -340,11 +353,11 @@ export class FriendsService {
           fr.status,
           fr.created_at,
           u.username,
-          u.display_name,
+          u."displayName" as display_name,
           u.avatar as photo_url,
-          u.numeric_id as custom_id
+          u."numericId" as custom_id
         FROM friend_requests fr
-        JOIN users u ON u.id = fr.to_user_id
+        JOIN "User" u ON u.id = fr.to_user_id
         WHERE fr.from_user_id = $1
         ORDER BY fr.created_at DESC
       `,

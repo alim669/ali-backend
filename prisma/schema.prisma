@@ -21,6 +21,8 @@ model User {
   bio                                                String?
   role                                               UserRole          @default(USER)
   status                                             UserStatus        @default(ACTIVE)
+  isVIP                                              Boolean           @default(false)
+  vipExpiresAt                                       DateTime?
   emailVerified                                      Boolean           @default(false)
   lastLoginAt                                        DateTime?
   lastLoginIp                                        String?
@@ -45,6 +47,14 @@ model User {
   friend_requests_friend_requests_to_user_idToUser   friend_requests[] @relation("friend_requests_to_user_idToUser")
   friendships_friendships_user1_idToUser             friendships[]     @relation("friendships_user1_idToUser")
   friendships_friendships_user2_idToUser             friendships[]     @relation("friendships_user2_idToUser")
+  // Private Messages
+  sentPrivateMessages                                PrivateMessage[]  @relation("PrivateMessageSender")
+  receivedPrivateMessages                            PrivateMessage[]  @relation("PrivateMessageReceiver")
+  // Block System
+  blockedUsers                                       UserBlock[]       @relation("Blocker")
+  blockedByUsers                                     UserBlock[]       @relation("Blocked")
+  // Device Tokens
+  deviceTokens                                       DeviceToken[]
 
   @@index([email])
   @@index([googleId])
@@ -489,4 +499,92 @@ enum AgentStatus {
   ACTIVE
   INACTIVE
   SUSPENDED
+}
+
+// ================================
+// Private Messaging System
+// ================================
+
+model PrivateMessage {
+  id          String               @id @default(uuid())
+  senderId    String
+  receiverId  String
+  type        PrivateMessageType   @default(TEXT)
+  content     String
+  metadata    Json?
+  status      PrivateMessageStatus @default(SENT)
+  isDeleted   Boolean              @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  sender      User                 @relation("PrivateMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver    User                 @relation("PrivateMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([senderId, receiverId])
+  @@index([receiverId, status])
+  @@index([createdAt])
+}
+
+enum PrivateMessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  GIFT
+}
+
+enum PrivateMessageStatus {
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ================================
+// User Block System
+// ================================
+
+model UserBlock {
+  id          String   @id @default(uuid())
+  blockerId   String
+  blockedId   String
+  reason      String?
+  createdAt   DateTime @default(now())
+  blocker     User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked     User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+// ================================
+// Device Tokens for Push Notifications
+// ================================
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  Platform @default(ANDROID)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([userId, isActive])
+}
+
+enum Platform {
+  ANDROID
+  IOS
+  WEB
 }

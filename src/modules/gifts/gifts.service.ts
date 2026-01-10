@@ -166,6 +166,8 @@ export class GiftsService {
   // ================================
 
   async sendGift(senderId: string, dto: SendGiftDto, idempotencyKey: string) {
+    this.logger.log(`🎁 sendGift called: senderId=${senderId}, giftId=${dto.giftId}, receiverId=${dto.receiverId}, roomId=${dto.roomId}`);
+    
     // Check idempotency - prevent duplicate sends
     const existingSend = await this.prisma.giftSend.findUnique({
       where: { idempotencyKey },

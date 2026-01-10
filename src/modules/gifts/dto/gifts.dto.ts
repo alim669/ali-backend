@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
 } from "class-validator";
+import { Type } from "class-transformer";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { GiftType } from "@prisma/client";
 
@@ -102,16 +103,17 @@ export class SendGiftDto {
   giftId: string;
 
   @ApiProperty({ description: "معرف المستلم" })
-  @IsUUID()
+  @IsString()
   receiverId: string;
 
   @ApiPropertyOptional({ description: "معرف الغرفة (اختياري)" })
   @IsOptional()
-  @IsUUID()
+  @IsString()
   roomId?: string;
 
   @ApiPropertyOptional({ default: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(100)

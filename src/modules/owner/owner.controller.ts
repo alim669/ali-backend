@@ -17,7 +17,8 @@ import {
   HttpStatus,
   Logger,
 } from "@nestjs/common";
-import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { IsString, IsBoolean, IsOptional, IsNumber, IsEnum, IsUUID } from "class-validator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { Roles } from "../auth/decorators/roles.decorator";
@@ -26,67 +27,145 @@ import { OwnerService, LockdownLevel, PunishmentType } from "./owner.service";
 import { UserRole } from "@prisma/client";
 
 // ================================
-// DTOs
+// DTOs with class-validator decorators
 // ================================
 
 class MaintenanceModeDto {
+  @ApiProperty()
+  @IsBoolean()
   enabled: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   message?: string;
 }
 
 class LockdownDto {
+  @ApiProperty({ enum: LockdownLevel })
+  @IsEnum(LockdownLevel)
   level: LockdownLevel;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
 }
 
 class FeatureToggleDto {
+  @ApiProperty()
+  @IsString()
   featureKey: string;
+
+  @ApiProperty()
+  @IsBoolean()
   enabled: boolean;
 }
 
 class AnnouncementDto {
+  @ApiProperty()
+  @IsString()
   message: string;
+
+  @ApiPropertyOptional({ enum: ["low", "normal", "high", "urgent"] })
+  @IsOptional()
+  @IsString()
   priority?: "low" | "normal" | "high" | "urgent";
 }
 
 class PunishUserDto {
+  @ApiProperty()
+  @IsUUID()
   userId: string;
+
+  @ApiProperty({ enum: PunishmentType })
+  @IsEnum(PunishmentType)
   type: PunishmentType;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
   duration?: number; // hours
 }
 
 class LiftPunishmentDto {
+  @ApiProperty()
+  @IsUUID()
   userId: string;
+
+  @ApiProperty({ enum: PunishmentType })
+  @IsEnum(PunishmentType)
   type: PunishmentType;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   reason?: string;
 }
 
 class AdjustBalanceDto {
+  @ApiProperty()
+  @IsUUID()
   userId: string;
+
+  @ApiProperty()
+  @IsNumber()
   amount: number;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
 }
 
 class EconomyFreezeDto {
+  @ApiProperty()
+  @IsBoolean()
   frozen: boolean;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
 }
 
 class ReverseGiftDto {
+  @ApiProperty()
+  @IsString()
   transactionId: string;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
 }
 
 class SetUserRoleDto {
+  @ApiProperty({ description: "User ID" })
+  @IsUUID()
   userId: string;
+
+  @ApiProperty({ enum: UserRole, description: "New role for the user" })
+  @IsEnum(UserRole)
   role: UserRole;
+
+  @ApiPropertyOptional({ description: "Reason for role change" })
+  @IsOptional()
+  @IsString()
   reason?: string;
 }
 
 class TransferRoomOwnershipDto {
+  @ApiProperty()
+  @IsUUID()
   roomId: string;
+
+  @ApiProperty()
+  @IsUUID()
   newOwnerId: string;
+
+  @ApiProperty()
+  @IsString()
   reason: string;
 }
 

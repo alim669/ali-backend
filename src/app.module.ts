@@ -8,10 +8,11 @@ import { PrismaModule } from "./common/prisma/prisma.module";
 import { RedisModule } from "./common/redis/redis.module";
 import { CacheModule } from "./common/cache/cache.module";
 import { UploadModule } from "./common/upload/upload.module";
-import { FirebaseModule } from "./common/firebase/firebase.module";
 import { SecurityModule } from "./common/security/security.module";
 import { MonitoringModule } from "./common/monitoring/monitoring.module";
 import { CleanupModule } from "./common/cleanup/cleanup.module";
+import { EmailModule } from "./common/email/email.module";
+import { LoggerModule } from "./common/logger/logger.module";
 import { SecurityMiddleware } from "./common/security/middleware/security.middleware";
 import { LoggingInterceptor } from "./common/monitoring/interceptors/logging.interceptor";
 import { PerformanceInterceptor } from "./common/monitoring/interceptors/performance.interceptor";
@@ -31,19 +32,33 @@ import { FriendsModule } from "./modules/friends/friends.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { HealthModule } from "./modules/health/health.module";
 import { AgentsModule } from "./modules/agents/agents.module";
+import { OwnerModule } from "./modules/owner/owner.module";
 import { VIPModule } from "./modules/vip/vip.module";
+import { VerificationModule } from "./modules/verification/verification.module";
+import { PrivateChatsModule } from "./modules/private-chats/private-chats.module";
 import { ScheduledTasksModule } from "./common/scheduled/scheduled-tasks.module";
+import { ExploreModule } from "./modules/explore/explore.module";
+import { DiceGameModule } from "./modules/games/dice/dice-game.module";
+import { NameIconsModule } from "./modules/name-icons/name-icons.module";
+import { AppealsModule } from "./modules/appeals/appeals.module";
 
 // Guards
 import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
+import { configuration, envValidationSchema } from "./config";
 
 @Module({
   imports: [
-    // Configuration
+    // Configuration with Validation
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env.local", ".env"],
       cache: true,
+      load: [configuration],
+      validationSchema: envValidationSchema,
+      validationOptions: {
+        allowUnknown: true,
+        abortEarly: false,
+      },
     }),
 
     // Rate Limiting - حماية متقدمة
@@ -74,11 +89,14 @@ import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
     RedisModule,
     CacheModule,
     UploadModule,
-    FirebaseModule,
 
     // Security & Monitoring
     SecurityModule,
     MonitoringModule,
+
+    // Email & Logging
+    EmailModule,
+    LoggerModule,
 
     // Feature Modules
     AuthModule,
@@ -95,7 +113,14 @@ import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
     ReportsModule,
     HealthModule,
     AgentsModule,
+    OwnerModule,
     VIPModule,
+    VerificationModule,
+    PrivateChatsModule,
+    ExploreModule,
+    DiceGameModule,
+    NameIconsModule,
+    AppealsModule,
     CleanupModule,
     ScheduledTasksModule,
   ],

@@ -31,6 +31,11 @@ export class FriendsController {
     @CurrentUser("id") userId: string,
     @Body("toUserId") toUserId: string,
   ) {
+    console.log(`📨 FriendsController.sendFriendRequest: userId=${userId}, toUserId=${toUserId}`);
+    if (!toUserId) {
+      console.log('❌ toUserId is missing or empty');
+      throw new Error('toUserId is required');
+    }
     return this.friendsService.sendFriendRequest(userId, toUserId);
   }
 

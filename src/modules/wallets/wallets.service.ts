@@ -5,12 +5,14 @@ import {
   Logger,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { CacheService } from "../../common/cache/cache.service";
 import {
   DepositDto,
   WithdrawDto,
   DeductDto,
   AdminAdjustBalanceDto,
   TransactionQueryDto,
+  TransferByCustomIdDto,
 } from "./dto/wallets.dto";
 import { TransactionType, TransactionStatus, Prisma } from "@prisma/client";
 
@@ -18,7 +20,26 @@ import { TransactionType, TransactionStatus, Prisma } from "@prisma/client";
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cache: CacheService,
+  ) {}
+  
+  private toBigInt(amount: number) {
+    if (!Number.isFinite(amount)) {
+      throw new BadRequestException("قيمة غير صالحة");
+    }
+    return BigInt(Math.trunc(amount));
+  }
+  
+  private toNumber(value: bigint | number | null | undefined) {
+    if (value === null || value === undefined) return 0;
+    return typeof value === "bigint" ? Number(value) : value;
+  }
+
+  private toPrismaBigInt(value: bigint) {
+    return value as unknown as number;
+  }
 
   // ================================
   // GET WALLET
@@ -51,8 +72,8 @@ export class WalletsService {
 
     return {
       id: wallet.id,
-      balance: wallet.balance,
-      diamonds: wallet.diamonds,
+      balance: this.toNumber(wallet.balance),
+      diamonds: this.toNumber(wallet.diamonds),
     };
   }
 
@@ -69,12 +90,14 @@ export class WalletsService {
       throw new NotFoundException("المحفظة غير موجودة");
     }
 
+    const amount = this.toBigInt(dto.amount);
+    const prismaAmount = this.toPrismaBigInt(amount);
     const result = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
         const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
           data: {
-            balance: { increment: dto.amount },
+            balance: { increment: prismaAmount },
             version: { increment: 1 },
           },
         });
@@ -84,7 +107,7 @@ export class WalletsService {
             walletId: wallet.id,
             type: TransactionType.DEPOSIT,
             status: TransactionStatus.COMPLETED,
-            amount: dto.amount,
+            amount: prismaAmount,
             balanceBefore: wallet.balance,
             balanceAfter: updatedWallet.balance,
             description: "إيداع رصيد",
@@ -101,9 +124,12 @@ export class WalletsService {
 
     this.logger.log(`Deposit: ${dto.amount} coins to user ${userId}`);
 
+    // Invalidate user cache to refresh balance
+    await this.cache.invalidateUser(userId);
+
     return {
       success: true,
-      newBalance: result.balance,
+      newBalance: this.toNumber(result.balance),
     };
   }
 
@@ -120,7 +146,9 @@ export class WalletsService {
       throw new NotFoundException("المحفظة غير موجودة");
     }
 
-    if (wallet.balance < dto.amount) {
+    const amount = this.toBigInt(dto.amount);
+    const prismaAmount = this.toPrismaBigInt(amount);
+    if (wallet.balance < amount) {
       throw new BadRequestException("رصيد غير كافي");
     }
 
@@ -134,7 +162,7 @@ export class WalletsService {
         const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
           data: {
-            balance: { decrement: dto.amount },
+            balance: { decrement: prismaAmount },
             version: { increment: 1 },
           },
         });
@@ -144,7 +172,7 @@ export class WalletsService {
             walletId: wallet.id,
             type: TransactionType.WITHDRAWAL,
             status: TransactionStatus.PENDING, // Needs admin approval
-            amount: -dto.amount,
+            amount: this.toPrismaBigInt(-amount),
             balanceBefore: wallet.balance,
             balanceAfter: updatedWallet.balance,
             description: "طلب سحب",
@@ -163,9 +191,12 @@ export class WalletsService {
       `Withdrawal request: ${dto.amount} coins from user ${userId}`,
     );
 
+    // Invalidate user cache to refresh balance
+    await this.cache.invalidateUser(userId);
+
     return {
       success: true,
-      newBalance: result.wallet.balance,
+      newBalance: this.toNumber(result.wallet.balance),
       transactionId: result.transaction.id,
       status: "pending",
       message: "تم إرسال طلب السحب وسيتم مراجعته",
@@ -189,7 +220,9 @@ export class WalletsService {
     const balanceToCheck =
       dto.type === "diamonds" ? wallet.diamonds : wallet.balance;
 
-    if (balanceToCheck < dto.amount) {
+    const amount = this.toBigInt(dto.amount);
+    const prismaAmount = this.toPrismaBigInt(amount);
+    if (balanceToCheck < amount) {
       throw new BadRequestException("رصيد غير كافي");
     }
 
@@ -198,8 +231,8 @@ export class WalletsService {
         // Update balance based on type
         const updateData =
           dto.type === "diamonds"
-            ? { diamonds: { decrement: dto.amount }, version: { increment: 1 } }
-            : { balance: { decrement: dto.amount }, version: { increment: 1 } };
+            ? { diamonds: { decrement: prismaAmount }, version: { increment: 1 } }
+            : { balance: { decrement: prismaAmount }, version: { increment: 1 } };
 
         const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
@@ -218,7 +251,7 @@ export class WalletsService {
             walletId: wallet.id,
             type: TransactionType.PURCHASE,
             status: TransactionStatus.COMPLETED,
-            amount: -dto.amount,
+            amount: this.toPrismaBigInt(-amount),
             balanceBefore,
             balanceAfter,
             description: dto.reason || "عملية شراء",
@@ -236,9 +269,15 @@ export class WalletsService {
       `Deduct: ${dto.amount} ${dto.type || "coins"} from user ${userId}`,
     );
 
+    // Invalidate user cache to refresh balance
+    await this.cache.invalidateUser(userId);
+
     return {
       success: true,
-      newBalance: dto.type === "diamonds" ? result.diamonds : result.balance,
+      newBalance:
+        dto.type === "diamonds"
+          ? this.toNumber(result.diamonds)
+          : this.toNumber(result.balance),
     };
   }
 
@@ -282,8 +321,15 @@ export class WalletsService {
       this.prisma.walletTransaction.count({ where }),
     ]);
 
+    const mappedTransactions = transactions.map((tx) => ({
+      ...tx,
+      amount: this.toNumber(tx.amount),
+      balanceBefore: this.toNumber(tx.balanceBefore),
+      balanceAfter: this.toNumber(tx.balanceAfter),
+    }));
+
     return {
-      data: transactions,
+      data: mappedTransactions,
       meta: {
         total,
         page,
@@ -310,7 +356,9 @@ export class WalletsService {
       throw new NotFoundException("المحفظة غير موجودة");
     }
 
-    if (dto.amount < 0 && wallet.balance < Math.abs(dto.amount)) {
+    const amount = this.toBigInt(dto.amount);
+    const prismaAmount = this.toPrismaBigInt(amount);
+    if (dto.amount < 0 && wallet.balance < BigInt(Math.abs(dto.amount))) {
       throw new BadRequestException("لا يمكن خصم أكثر من الرصيد المتاح");
     }
 
@@ -319,7 +367,7 @@ export class WalletsService {
         const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
           data: {
-            balance: { increment: dto.amount },
+            balance: { increment: prismaAmount },
             version: { increment: 1 },
           },
         });
@@ -329,7 +377,7 @@ export class WalletsService {
             walletId: wallet.id,
             type: TransactionType.ADMIN_ADJUSTMENT,
             status: TransactionStatus.COMPLETED,
-            amount: dto.amount,
+            amount: prismaAmount,
             balanceBefore: wallet.balance,
             balanceAfter: updatedWallet.balance,
             description: dto.reason,
@@ -344,10 +392,10 @@ export class WalletsService {
             targetId: targetUserId,
             action: "WALLET_ADJUSTED",
             details: {
-              amount: dto.amount,
+              amount: this.toNumber(amount),
               reason: dto.reason,
-              balanceBefore: wallet.balance,
-              balanceAfter: updatedWallet.balance,
+              balanceBefore: this.toNumber(wallet.balance),
+              balanceAfter: this.toNumber(updatedWallet.balance),
             },
           },
         });
@@ -360,9 +408,147 @@ export class WalletsService {
       `Admin ${adminId} adjusted balance for ${targetUserId}: ${dto.amount}`,
     );
 
+    // Invalidate user cache to refresh balance
+    await this.cache.invalidateUser(targetUserId);
+
     return {
       success: true,
-      newBalance: result.balance,
+      newBalance: this.toNumber(result.balance),
+    };
+  }
+
+  // ================================
+  // TRANSFER BY CUSTOM ID (numericId)
+  // ================================
+
+  async transferByCustomId(senderId: string, dto: TransferByCustomIdDto) {
+    // Find recipient by numericId (convert string to BigInt)
+    const numericId = BigInt(dto.recipientCustomId);
+    const recipient = await this.prisma.user.findFirst({
+      where: { numericId },
+    });
+
+    if (!recipient) {
+      throw new NotFoundException("المستلم غير موجود - تحقق من الـ ID");
+    }
+
+    if (recipient.id === senderId) {
+      throw new BadRequestException("لا يمكنك التحويل لنفسك");
+    }
+
+    // Get sender wallet
+    const senderWallet = await this.prisma.wallet.findUnique({
+      where: { userId: senderId },
+    });
+
+    if (!senderWallet) {
+      throw new NotFoundException("محفظتك غير موجودة");
+    }
+
+    const amount = this.toBigInt(dto.amount);
+    const prismaAmount = this.toPrismaBigInt(amount);
+    if (senderWallet.balance < amount) {
+      throw new BadRequestException("رصيد غير كافي");
+    }
+
+    // Minimum transfer
+    if (dto.amount < 10) {
+      throw new BadRequestException("الحد الأدنى للتحويل 10 عملات");
+    }
+
+    // Get or create recipient wallet
+    let recipientWallet = await this.prisma.wallet.findUnique({
+      where: { userId: recipient.id },
+    });
+
+    if (!recipientWallet) {
+      recipientWallet = await this.prisma.wallet.create({
+        data: {
+          userId: recipient.id,
+          balance: 0,
+          diamonds: 0,
+        },
+      });
+    }
+
+    const result = await this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // Deduct from sender
+        const updatedSenderWallet = await tx.wallet.update({
+          where: { id: senderWallet.id },
+          data: {
+            balance: { decrement: prismaAmount },
+            version: { increment: 1 },
+          },
+        });
+
+        // Add to recipient
+        const updatedRecipientWallet = await tx.wallet.update({
+          where: { id: recipientWallet.id },
+          data: {
+            balance: { increment: prismaAmount },
+            version: { increment: 1 },
+          },
+        });
+
+        // Record sender transaction
+        await tx.walletTransaction.create({
+          data: {
+            walletId: senderWallet.id,
+            type: 'TRANSFER',
+            status: TransactionStatus.COMPLETED,
+            amount: this.toPrismaBigInt(-amount),
+            balanceBefore: senderWallet.balance,
+            balanceAfter: updatedSenderWallet.balance,
+            description: `تحويل إلى ${recipient.displayName || recipient.username}`,
+            metadata: {
+              recipientId: recipient.id,
+              recipientNumericId: dto.recipientCustomId,
+              note: dto.note,
+            },
+          } as any,
+        });
+
+        // Record recipient transaction
+        await tx.walletTransaction.create({
+          data: {
+            walletId: recipientWallet.id,
+            type: 'TRANSFER',
+            status: TransactionStatus.COMPLETED,
+            amount: prismaAmount,
+            balanceBefore: recipientWallet.balance,
+            balanceAfter: updatedRecipientWallet.balance,
+            description: "استلام تحويل",
+            metadata: {
+              senderId: senderId,
+              note: dto.note,
+            },
+          } as any,
+        });
+
+        return { senderWallet: updatedSenderWallet, recipientWallet: updatedRecipientWallet };
+      },
+    );
+
+    this.logger.log(
+      `Transfer: ${dto.amount} coins from ${senderId} to ${recipient.id} (numericId: ${dto.recipientCustomId})`,
+    );
+
+    // Invalidate caches for both users
+    await this.cache.invalidateUser(senderId);
+    await this.cache.invalidateUser(recipient.id);
+
+    return {
+      success: true,
+      newBalance: this.toNumber(result.senderWallet.balance),
+      recipient: {
+        id: recipient.id,
+        numericId: recipient.numericId?.toString(),
+        name: recipient.displayName || recipient.username,
+        avatar: recipient.avatar,
+      },
+      amount: dto.amount,
+      message: `تم تحويل ${dto.amount} عملة بنجاح`,
     };
   }
 
@@ -404,12 +590,12 @@ export class WalletsService {
     ]);
 
     return {
-      balance: wallet.balance,
-      diamonds: wallet.diamonds,
-      totalDeposits: totalDeposits._sum.amount || 0,
-      totalWithdrawals: Math.abs(totalWithdrawals._sum.amount || 0),
-      totalGiftsSent: Math.abs(totalGiftsSent._sum.amount || 0),
-      totalGiftsReceived: totalGiftsReceived._sum.amount || 0,
+      balance: this.toNumber(wallet.balance),
+      diamonds: this.toNumber(wallet.diamonds),
+      totalDeposits: this.toNumber(totalDeposits._sum.amount),
+      totalWithdrawals: Math.abs(this.toNumber(totalWithdrawals._sum.amount)),
+      totalGiftsSent: Math.abs(this.toNumber(totalGiftsSent._sum.amount)),
+      totalGiftsReceived: this.toNumber(totalGiftsReceived._sum.amount),
     };
   }
 }

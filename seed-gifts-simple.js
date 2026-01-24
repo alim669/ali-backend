@@ -12,6 +12,8 @@ async function seed() {
     { id: 'diamond', name: 'ماسة', price: 1000, type: 'VIDEO_VIP', imageUrl: 'assets/gifts/diamond.png' },
     { id: 'rocket', name: 'صاروخ', price: 2000, type: 'VIDEO_VIP', imageUrl: 'assets/gifts/rocket.png' },
     { id: 'castle', name: 'قلعة', price: 5000, type: 'VIDEO_VIP', imageUrl: 'assets/gifts/castle.png' },
+    { id: 'lion_vip', name: 'Lion King', price: 12000, type: 'VIDEO_VIP', imageUrl: 'assets/gifts/lion.png', videoUrl: 'assets/gifts/lion_vip_gift_final.mp4' },
+    { id: 'ferrari_vip', name: 'Ferrari VIP', price: 15000, type: 'VIDEO_VIP', imageUrl: 'assets/gifts/ferrari.png', videoUrl: 'assets/gifts/ferrari_vip.mp4' },
     { id: 'lion', name: 'أسد', price: 200, type: 'ANIMATED', imageUrl: 'assets/gifts/lion.png' },
     { id: 'trophy', name: 'كأس', price: 150, type: 'ANIMATED', imageUrl: 'assets/gifts/trophy.png' },
     { id: 'gold_ring', name: 'خاتم ذهبي', price: 300, type: 'ANIMATED', imageUrl: 'assets/gifts/gold_ring.png' },

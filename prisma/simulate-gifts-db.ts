@@ -59,19 +59,21 @@ async function simulateGifts() {
         continue;
       }
       
+      const priceBig = BigInt(price);
+
       // إنشاء transaction
       await prisma.$transaction(async (tx) => {
         // خصم من المرسل
         await tx.wallet.update({
           where: { userId: sender.id },
-          data: { balance: { decrement: price } }
+          data: { balance: { decrement: priceBig } }
         });
         
         // إضافة للمستلم
         if (receiver.wallet) {
           await tx.wallet.update({
             where: { userId: receiver.id },
-            data: { balance: { increment: Math.floor(price * 0.7) } }
+            data: { balance: { increment: BigInt(Math.floor(price * 0.7)) } }
           });
         }
         
@@ -93,7 +95,7 @@ async function simulateGifts() {
       
       // تحديث رصيد المستخدم محلياً
       if (sender.wallet) {
-        sender.wallet.balance -= price;
+        sender.wallet.balance -= priceBig;
       }
       
     } catch (error: any) {

@@ -9,6 +9,21 @@ import { RedisService } from "../../common/redis/redis.service";
 import { SendMessageDto, MessageQueryDto } from "./dto/messages.dto";
 import { MessageType, MemberRole } from "@prisma/client";
 
+// Helper function to convert BigInt to number in objects
+function serializeData(data: any): any {
+  if (data === null || data === undefined) return data;
+  if (typeof data === 'bigint') return Number(data);
+  if (Array.isArray(data)) return data.map(serializeData);
+  if (typeof data === 'object' && data !== null) {
+    const result: any = {};
+    for (const key of Object.keys(data)) {
+      result[key] = serializeData(data[key]);
+    }
+    return result;
+  }
+  return data;
+}
+
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
@@ -56,9 +71,16 @@ export class MessagesService {
         sender: {
           select: {
             id: true,
+            numericId: true,
             username: true,
             displayName: true,
             avatar: true,
+            verification: {
+              select: {
+                type: true,
+                expiresAt: true,
+              },
+            },
           },
         },
       },
@@ -110,49 +132,64 @@ export class MessagesService {
       where.type = type;
     }
 
-    const [messages, total] = await Promise.all([
-      this.prisma.message.findMany({
-        where,
-        include: {
-          sender: {
-            select: {
-              id: true,
-              username: true,
-              displayName: true,
-              avatar: true,
+    try {
+      const [messages, total] = await Promise.all([
+        this.prisma.message.findMany({
+          where,
+          include: {
+            sender: {
+              select: {
+                id: true,
+                numericId: true,
+                username: true,
+                displayName: true,
+                avatar: true,
+                verification: {
+                  select: {
+                    type: true,
+                    expiresAt: true,
+                  },
+                },
+              },
             },
-          },
-          giftSend: {
-            include: {
-              gift: {
-                select: {
-                  id: true,
-                  name: true,
-                  imageUrl: true,
-                  animationUrl: true,
-                  type: true,
+            giftSend: {
+              include: {
+                gift: {
+                  select: {
+                    id: true,
+                    name: true,
+                    imageUrl: true,
+                    animationUrl: true,
+                    type: true,
+                  },
                 },
               },
             },
           },
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      this.prisma.message.count({ where }),
-    ]);
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+        }),
+        this.prisma.message.count({ where }),
+      ]);
 
-    return {
-      data: messages.reverse(), // Return in chronological order
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasMore: skip + limit < total,
-      },
-    };
+      // Serialize to handle BigInt values
+      const serializedMessages = serializeData(messages);
+
+      return {
+        data: serializedMessages.reverse(), // Return in chronological order
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasMore: skip + limit < total,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error fetching messages for room ${roomId}: ${error.message}`);
+      throw error;
+    }
   }
 
   // ================================
@@ -291,6 +328,12 @@ export class MessagesService {
             username: true,
             displayName: true,
             avatar: true,
+            verification: {
+              select: {
+                type: true,
+                expiresAt: true,
+              },
+            },
           },
         },
         giftSend: {

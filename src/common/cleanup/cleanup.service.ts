@@ -47,6 +47,7 @@ export class CleanupService implements OnModuleInit {
     try {
       results.expiredTokens = await this.cleanupExpiredRefreshTokens();
       results.expiredVIPs = await this.cleanupExpiredVIPs();
+      results.expiredVerifications = await this.cleanupExpiredVerifications();
       results.oldNotifications = await this.cleanupOldNotifications();
       results.expiredBans = await this.cleanupExpiredBans();
       results.expiredMutes = await this.cleanupExpiredMutes();
@@ -114,6 +115,61 @@ export class CleanupService implements OnModuleInit {
       return result.count;
     } catch (error) {
       this.logger.error(`Failed to cleanup VIPs: ${error.message}`);
+      return 0;
+    }
+  }
+
+  // ================================
+  // CLEANUP EXPIRED VERIFICATIONS
+  // ================================
+
+  async cleanupExpiredVerifications(): Promise<number> {
+    try {
+      const now = new Date();
+
+      // Get expired verifications for logging
+      const expiredVerifications = await this.prisma.verification.findMany({
+        where: {
+          expiresAt: { lt: now },
+        },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+        },
+      });
+
+      if (expiredVerifications.length === 0) {
+        return 0;
+      }
+
+      // Delete expired verifications
+      const result = await this.prisma.verification.deleteMany({
+        where: {
+          expiresAt: { lt: now },
+        },
+      });
+
+      // Clear cache for each expired verification
+      for (const verification of expiredVerifications) {
+        await this.redis.del(`verification:${verification.userId}`);
+        // Publish expiration event
+        await this.redis.publish("verification:expired", {
+          type: "verification_expired",
+          data: {
+            userId: verification.userId,
+            verificationType: verification.type,
+          },
+        });
+      }
+
+      if (result.count > 0) {
+        this.logger.log(`Expired ${result.count} verifications`);
+      }
+
+      return result.count;
+    } catch (error) {
+      this.logger.error(`Failed to cleanup verifications: ${error.message}`);
       return 0;
     }
   }

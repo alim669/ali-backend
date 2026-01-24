@@ -7,11 +7,14 @@ node_modules/
 dist/
 build/
 
-# Environment files
+# Environment files - NEVER commit these!
 .env
 .env.local
+.env.neon
 .env.production
+.env.production.server
 .env.*.local
+.env.backup_*
 
 # IDE
 .idea/

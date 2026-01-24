@@ -165,10 +165,23 @@ export class AdminController {
       LIMIT 30
     `;
 
+    const totalRevenue =
+      typeof result._sum.amount === "bigint"
+        ? Number(result._sum.amount)
+        : result._sum.amount || 0;
+
+    const dailyBreakdown = (dailyRevenue as any[]).map((row) => ({
+      ...row,
+      total:
+        typeof row.total === "bigint" ? Number(row.total) : Number(row.total),
+      count:
+        typeof row.count === "bigint" ? Number(row.count) : Number(row.count),
+    }));
+
     return {
-      totalRevenue: result._sum.amount || 0,
+      totalRevenue,
       transactionCount: result._count.id,
-      dailyBreakdown: dailyRevenue,
+      dailyBreakdown,
     };
   }
 
@@ -220,5 +233,155 @@ export class AdminController {
       ...this.cache.getStats(),
       timestamp: new Date().toISOString(),
     };
+  }
+
+  @Get("users/banned")
+  @ApiOperation({ summary: "جلب المستخدمين المحظورين" })
+  async getBannedUsers() {
+    const users = await this.prisma.user.findMany({
+      where: { status: "BANNED" },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        avatar: true,
+        role: true,
+        status: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return { data: users };
+  }
+
+  @Get("stats")
+  @ApiOperation({ summary: "إحصائيات التطبيق" })
+  async getAppStats() {
+    const [totalUsers, totalRooms, bannedUsers, activeUsers] =
+      await Promise.all([
+        this.prisma.user.count(),
+        this.prisma.room.count(),
+        this.prisma.user.count({ where: { status: "BANNED" } }),
+        this.prisma.user.count({ where: { status: "ACTIVE" } }),
+      ]);
+
+    // Get online users from Redis
+    let onlineUsers = 0;
+    try {
+      const client = this.redis.getClient();
+      if (client) {
+        const keys = await client.keys("presence:user:*");
+        onlineUsers = keys.length;
+      }
+    } catch (e) {}
+
+    return {
+      totalUsers,
+      totalRooms,
+      totalPosts: 0,
+      bannedUsers,
+      activeUsers,
+      onlineUsers,
+    };
+  }
+
+  @Get("users")
+  @ApiOperation({ summary: "جلب المستخدمين" })
+  async getUsers(
+    @Query("page") page: number = 1,
+    @Query("limit") limit: number = 20,
+    @Query("search") search?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (search) {
+      where.OR = [
+        { email: { contains: search, mode: "insensitive" } },
+        { username: { contains: search, mode: "insensitive" } },
+        { displayName: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          displayName: true,
+          avatar: true,
+          role: true,
+          status: true,
+          createdAt: true,
+          lastLoginAt: true,
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: users,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  @Get("users/search")
+  @ApiOperation({ summary: "بحث عن مستخدمين" })
+  async searchUsers(@Query("q") query: string, @Query("limit") limit = 20) {
+    if (!query || query.length < 2) {
+      return { data: [] };
+    }
+
+    // Build search conditions
+    const searchConditions: any[] = [
+      { email: { contains: query, mode: "insensitive" } },
+      { username: { contains: query, mode: "insensitive" } },
+      { displayName: { contains: query, mode: "insensitive" } },
+      { customId: { contains: query, mode: "insensitive" } },
+    ];
+
+    // Only add numericId search if query is a valid number
+    if (/^\d+$/.test(query)) {
+      try {
+        searchConditions.push({ numericId: { equals: BigInt(query) } });
+      } catch (e) {
+        // Ignore invalid BigInt
+      }
+    }
+
+    // Also search by UUID if it looks like one
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query)) {
+      searchConditions.push({ id: query });
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        OR: searchConditions,
+      },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        displayName: true,
+        avatar: true,
+        role: true,
+        status: true,
+        customId: true,
+        numericId: true,
+        banReason: true,
+        bannedAt: true,
+        bannedUntil: true,
+      },
+      take: Number(limit),
+    });
+
+    return { data: users };
   }
 }

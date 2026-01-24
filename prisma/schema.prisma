@@ -11,6 +11,7 @@ datasource db {
 model User {
   id                                                 String            @id @default(uuid())
   numericId                                          BigInt            @unique @default(autoincrement())
+  customId                                           String?           @unique
   email                                              String            @unique
   passwordHash                                       String?
   googleId                                           String?           @unique
@@ -26,6 +27,11 @@ model User {
   emailVerified                                      Boolean           @default(false)
   lastLoginAt                                        DateTime?
   lastLoginIp                                        String?
+  // Ban fields
+  banReason                                          String?
+  bannedAt                                           DateTime?
+  bannedUntil                                        DateTime?
+  bannedBy                                           String?
   createdAt                                          DateTime          @default(now())
   updatedAt                                          DateTime          @updatedAt
   adminActions                                       AdminAction[]     @relation("AdminActor")
@@ -58,6 +64,15 @@ model User {
   // Agent Relations
   agentRequests                                      AgentRequest[]
   agent                                              Agent?
+  // Verification Badge
+  verification                                       Verification?
+  // Explore Posts
+  explorePosts                                       ExplorePost[]
+  // Mute System
+  mutesReceived                                      UserMute[]        @relation("MutedUser")
+  mutesApplied                                       UserMute[]        @relation("MutedBy")
+  // Appeals
+  appeals                                            Appeal[]
 
   @@index([email])
   @@index([googleId])
@@ -66,6 +81,7 @@ model User {
   @@index([createdAt])
   @@index([numericId])
   @@index([isVIP, vipExpiresAt])
+  @@index([customId])
 }
 
 model RefreshToken {
@@ -86,6 +102,7 @@ model RefreshToken {
 
 model Room {
   id                  String       @id @default(uuid())
+  numericId           Int          @unique @default(autoincrement())
   name                String
   description         String?
   avatar              String?
@@ -103,11 +120,13 @@ model Room {
   reports             Report[]
   owner               User         @relation("RoomOwner", fields: [ownerId], references: [id])
   members             RoomMember[]
+  userMutes           UserMute[]
 
   @@index([ownerId])
   @@index([type])
   @@index([status])
   @@index([createdAt])
+  @@index([numericId])
 }
 
 model RoomMember {
@@ -204,8 +223,8 @@ model GiftSend {
 model Wallet {
   id           String              @id @default(uuid())
   userId       String              @unique
-  balance      Int                 @default(0)
-  diamonds     Int                 @default(0)
+  balance      BigInt              @default(0)
+  diamonds     BigInt              @default(0)
   version      Int                 @default(0)
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
@@ -220,9 +239,9 @@ model WalletTransaction {
   walletId      String
   type          TransactionType
   status        TransactionStatus @default(COMPLETED)
-  amount        Int
-  balanceBefore Int
-  balanceAfter  Int
+  amount        BigInt
+  balanceBefore BigInt
+  balanceAfter  BigInt
   referenceType String?
   referenceId   String?
   description   String?
@@ -450,6 +469,7 @@ enum GiftType {
 enum TransactionType {
   DEPOSIT
   WITHDRAWAL
+  TRANSFER
   GIFT_SENT
   GIFT_RECEIVED
   PURCHASE
@@ -468,12 +488,26 @@ enum AdminActionType {
   USER_BANNED
   USER_SUSPENDED
   USER_UNBANNED
+  USER_WARNING
+  USER_MUTED
+  USER_SHADOW_BANNED
+  USER_IP_BANNED
+  USER_FROZEN
   ROOM_CLOSED
   ROOM_SUSPENDED
+  ROOM_DELETED
+  ROOM_OWNERSHIP_TRANSFERRED
   GIFT_CREATED
   GIFT_UPDATED
+  GIFT_REVERSED
   WALLET_ADJUSTED
   SETTINGS_CHANGED
+  SETTING_CHANGED
+  ROLE_CHANGED
+  FORCE_LOGOUT
+  FORCE_LOGOUT_ALL
+  VERIFICATION_GRANTED
+  VERIFICATION_REVOKED
 }
 
 enum NotificationType {
@@ -484,6 +518,8 @@ enum NotificationType {
   MENTION
   LIKE
   COMMENT
+  FRIEND_REQUEST_ACCEPTED
+  FRIEND_REQUEST_RECEIVED
 }
 
 enum ReportType {
@@ -577,6 +613,29 @@ model UserBlock {
 }
 
 // ================================
+// User Mute System (Global & Room Mutes)
+// ================================
+
+model UserMute {
+  id        String   @id @default(uuid())
+  userId    String
+  mutedById String
+  reason    String?
+  scope     String   @default("GLOBAL") // GLOBAL, ROOM
+  roomId    String?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation("MutedUser", fields: [userId], references: [id], onDelete: Cascade)
+  mutedBy   User     @relation("MutedBy", fields: [mutedById], references: [id], onDelete: Cascade)
+  room      Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([mutedById])
+  @@index([roomId])
+  @@index([expiresAt])
+}
+
+// ================================
 // Device Tokens for Push Notifications
 // ================================
 
@@ -599,4 +658,183 @@ enum Platform {
   ANDROID
   IOS
   WEB
+}
+
+// ================================
+// Verification Badges System
+// ================================
+
+model Verification {
+  id        String           @id @default(uuid())
+  userId    String           @unique
+  type      VerificationType
+  price     Int              @default(0)
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([expiresAt])
+}
+
+enum VerificationType {
+  BLUE
+  GOLD
+  PURPLE
+  DIAMOND
+  VIP        // توثيق VIP متحرك
+  VERIFIED   // توثيق رسمي مثل فيسبوك - أزرق كلاسيكي
+  OFFICIAL   // حساب رسمي للمؤسسات
+  CELEBRITY  // توثيق المشاهير
+}
+
+// ================================
+// Explore Posts (Reels) System
+// ================================
+
+model ExplorePost {
+  id            String              @id @default(uuid())
+  userId        String
+  userName      String
+  userHandle    String
+  caption       String
+  tags          String[]
+  country       String              @default("IQ")
+  locale        String              @default("ar")
+  durationSec   Int?
+  aspectRatio   Float?
+  thumbnailUrl  String?
+  mediaUrl      String?
+  isReel        Boolean             @default(false)
+  isVideo       Boolean             @default(false)
+  views         Int                 @default(0)
+  shares        Int                 @default(0)
+  lovesCount    Int                 @default(0)
+  firesCount    Int                 @default(0)
+  wowsCount     Int                 @default(0)
+  commentsCount Int                 @default(0)
+  isFeatured    Boolean             @default(false)
+  isHidden      Boolean             @default(false)
+  visibility    ExploreVisibility   @default(PUBLIC)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments      ExploreComment[]
+  bookmarks     ExploreBookmark[]
+
+  @@index([userId])
+  @@index([isHidden])
+  @@index([visibility])
+  @@index([isReel])
+  @@index([isFeatured])
+  @@index([createdAt])
+  @@index([views])
+}
+
+model ExploreComment {
+  id        String      @id @default(uuid())
+  postId    String
+  userId    String
+  userName  String
+  text      String
+  createdAt DateTime    @default(now())
+  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([createdAt])
+}
+
+model ExploreBookmark {
+  id        String      @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime    @default(now())
+  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
+
+enum ExploreVisibility {
+  PUBLIC
+  FOLLOWERS
+  PRIVATE
+}
+
+// ================================
+// Name Icons System (أيقونات بجانب الاسم)
+// ================================
+
+model NameIcon {
+  id          String   @id @default(uuid())
+  name        String   @unique // crown, fire, diamond, etc.
+  displayName String   // التاج الملكي
+  assetPath   String   // assets/name_icons/crown.gif
+  price       Int      @default(80000)
+  durationDays Int     @default(30) // مدة الصلاحية بالأيام
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  userIcons   UserNameIcon[]
+  
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model UserNameIcon {
+  id         String   @id @default(uuid())
+  userId     String
+  iconId     String
+  expiresAt  DateTime
+  isActive   Boolean  @default(true) // هل مفعلة حالياً
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  icon       NameIcon @relation(fields: [iconId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, iconId])
+  @@index([userId])
+  @@index([iconId])
+  @@index([expiresAt])
+  @@index([isActive])
+}
+
+// نظام الطعون/الاستئناف
+model Appeal {
+  id           String       @id @default(uuid())
+  userId       String
+  type         AppealType   @default(BAN_APPEAL)
+  reason       String       // سبب الطعن من المستخدم
+  status       AppealStatus @default(PENDING)
+  response     String?      // رد المشرف
+  reviewedBy   String?      // ID المشرف الذي راجعه
+  reviewedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+enum AppealType {
+  BAN_APPEAL       // طعن على الحظر
+  MUTE_APPEAL      // طعن على الكتم
+  WARNING_APPEAL   // طعن على التحذير
+  OTHER            // أخرى
+}
+
+enum AppealStatus {
+  PENDING          // قيد المراجعة
+  APPROVED         // تمت الموافقة
+  REJECTED         // مرفوض
+  IN_REVIEW        // جاري المراجعة
 }

@@ -116,7 +116,16 @@ export class AuthController {
   @ApiOperation({ summary: "الحصول على بيانات المستخدم الحالي" })
   @ApiResponse({ status: 200, description: "بيانات المستخدم" })
   async getMe(@CurrentUser() user: any) {
-    return { user };
+    // إرجاع بيانات المستخدم مع حقول الحظر
+    return { 
+      user: {
+        ...user,
+        // التأكد من وجود حقول الحظر
+        banReason: user.banReason || null,
+        bannedAt: user.bannedAt || null,
+        bannedUntil: user.bannedUntil || null,
+      }
+    };
   }
 
   private getClientIp(req: Request): string {

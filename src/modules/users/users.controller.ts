@@ -163,4 +163,19 @@ export class UsersController {
   async unbanUser(@Param("id") id: string, @CurrentUser("id") adminId: string) {
     return this.usersService.unbanUser(id, adminId);
   }
+
+  // ================================
+  // DELETE ACCOUNT
+  // ================================
+
+  @Post("me/delete")
+  @ApiOperation({ summary: "حذف الحساب نهائياً" })
+  @ApiResponse({ status: 200, description: "تم حذف الحساب بنجاح" })
+  async deleteMyAccount(
+    @CurrentUser("id") userId: string,
+    @Body("password") password?: string,
+    @Body("reason") reason?: string,
+  ) {
+    return this.usersService.deleteAccount(userId, password, reason);
+  }
 }

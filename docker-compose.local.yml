@@ -1,0 +1,104 @@
+version: '3.8'
+
+# ================================
+# Ali Backend - Local Development Environment
+# بيئة التطوير المحلية الكاملة
+# ================================
+# 📌 استخدم هذا لتشغيل قاعدة بيانات محلية سريعة
+# 📌 الأمر: docker-compose -f docker-compose.local.yml up -d
+
+services:
+  # ================================
+  # PostgreSQL Database (Local)
+  # ================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ali_postgres_local
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ali_user
+      POSTGRES_PASSWORD: ali_password_123
+      POSTGRES_DB: ali_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ali_postgres_local_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ali_user -d ali_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ali_local_network
+
+  # ================================
+  # Redis Cache (Local)
+  # ================================
+  redis:
+    image: redis:7-alpine
+    container_name: ali_redis_local
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - ali_redis_local_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ali_local_network
+
+  # ================================
+  # PgAdmin - Database Management UI
+  # ================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ali_pgadmin_local
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@ali.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - ali_pgadmin_local_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ali_local_network
+
+  # ================================
+  # Redis Commander - Redis Management UI
+  # ================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ali_redis_commander_local
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ali_local_network
+
+networks:
+  ali_local_network:
+    driver: bridge
+
+volumes:
+  ali_postgres_local_data:
+    name: ali_postgres_local_data
+  ali_redis_local_data:
+    name: ali_redis_local_data
+  ali_pgadmin_local_data:
+    name: ali_pgadmin_local_data

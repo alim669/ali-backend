@@ -123,4 +123,12 @@ export class GiftsController {
   async delete(@Param("id") id: string) {
     return this.giftsService.delete(id);
   }
+
+  @Post("cache/clear")
+  @UseGuards(RolesGuard)
+  @Roles("ADMIN", "SUPER_ADMIN")
+  @ApiOperation({ summary: "مسح cache الهدايا (مسؤول)" })
+  async clearCache() {
+    return this.giftsService.clearCache();
+  }
 }

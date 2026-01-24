@@ -85,6 +85,22 @@ export class VIPService {
     private redis: RedisService,
     private cache: CacheService,
   ) {}
+  
+  private toBigInt(amount: number) {
+    if (!Number.isFinite(amount)) {
+      throw new BadRequestException("قيمة غير صالحة");
+    }
+    return BigInt(Math.trunc(amount));
+  }
+  
+  private toNumber(value: bigint | number | null | undefined) {
+    if (value === null || value === undefined) return 0;
+    return typeof value === "bigint" ? Number(value) : value;
+  }
+
+  private toPrismaBigInt(value: bigint) {
+    return value as unknown as number;
+  }
 
   // ================================
   // GET VIP PACKAGES
@@ -168,8 +184,9 @@ export class VIPService {
     if (!wallet) {
       throw new NotFoundException("المحفظة غير موجودة");
     }
-
-    if (wallet.balance < pkg.price) {
+    const price = this.toBigInt(pkg.price);
+    const priceInput = this.toPrismaBigInt(price);
+    if (wallet.balance < price) {
       throw new BadRequestException("رصيد غير كافي");
     }
 
@@ -197,7 +214,7 @@ export class VIPService {
         const updatedWallet = await tx.wallet.update({
           where: { id: wallet.id },
           data: {
-            balance: { decrement: pkg.price },
+            balance: { decrement: priceInput },
             version: { increment: 1 },
           },
         });
@@ -208,7 +225,7 @@ export class VIPService {
             walletId: wallet.id,
             type: "PURCHASE",
             status: "COMPLETED",
-            amount: -pkg.price,
+            amount: this.toPrismaBigInt(-price),
             balanceBefore: wallet.balance,
             balanceAfter: updatedWallet.balance,
             description: `شراء باقة VIP: ${pkg.name}`,
@@ -249,7 +266,7 @@ export class VIPService {
     return {
       success: true,
       message: `تم تفعيل باقة ${pkg.name} بنجاح`,
-      newBalance: result.wallet.balance,
+      newBalance: this.toNumber(result.wallet.balance),
       vipExpiresAt: result.user.vipExpiresAt,
       package: pkg,
     };

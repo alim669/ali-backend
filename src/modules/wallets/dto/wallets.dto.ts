@@ -57,6 +57,23 @@ export class DeductDto {
   reason?: string;
 }
 
+// 🔄 DTO للتحويل باستخدام الـ Custom ID (numericId)
+export class TransferByCustomIdDto {
+  @ApiProperty({ example: "100000001", description: "الـ ID الرقمي للمستلم" })
+  @IsString()
+  recipientCustomId: string;
+
+  @ApiProperty({ example: 100, description: "المبلغ المراد تحويله" })
+  @IsInt()
+  @Min(1)
+  amount: number;
+
+  @ApiPropertyOptional({ example: "هدية", description: "ملاحظة للتحويل" })
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
 export class AdminAdjustBalanceDto {
   @ApiProperty({ example: 100, description: "مبلغ موجب للإضافة، سالب للخصم" })
   @IsInt()

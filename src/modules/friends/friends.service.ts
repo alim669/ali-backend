@@ -9,16 +9,31 @@ import {
 } from "@nestjs/common";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Pool } = require("pg");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const Redis = require("ioredis");
 
 @Injectable()
 export class FriendsService {
   private pool: any;
+  private redis: any;
 
   constructor() {
+    // تحديد SSL بناءً على DATABASE_URL
+    const dbUrl = process.env.DATABASE_URL || '';
+    const requireSSL = dbUrl.includes('sslmode=require') || dbUrl.includes('neon.tech');
+    
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: false,
+      connectionString: dbUrl,
+      ssl: requireSSL ? { rejectUnauthorized: false } : false,
     });
+    
+    // إنشاء Redis للإشعارات الفورية
+    this.redis = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      maxRetriesPerRequest: 3,
+    });
+    
     this.initTable();
   }
 
@@ -73,9 +88,12 @@ export class FriendsService {
       throw new BadRequestException("لا يمكنك إرسال طلب صداقة لنفسك");
     }
 
-    const client = await this.pool.connect();
+    let client;
     try {
+      client = await this.pool.connect();
+      
       // التحقق أولاً من وجود المستخدم المستلم
+      console.log(`📝 Checking if user exists: ${toUserId}`);
       const receiverCheck = await client.query(
         `SELECT id FROM "User" WHERE id = $1`,
         [toUserId],
@@ -85,8 +103,10 @@ export class FriendsService {
         console.log(`❌ User not found: ${toUserId}`);
         throw new NotFoundException("المستخدم غير موجود");
       }
+      console.log(`✅ User found: ${toUserId}`);
       
       // التحقق من عدم وجود صداقة مسبقة
+      console.log(`📝 Checking existing friendship...`);
       const existingFriendship = await client.query(
         `
         SELECT id FROM friendships 
@@ -129,6 +149,7 @@ export class FriendsService {
       }
 
       // إنشاء طلب جديد
+      console.log(`📝 Creating new friend request...`);
       const result = await client.query(
         `
         INSERT INTO friend_requests (from_user_id, to_user_id)
@@ -140,13 +161,37 @@ export class FriendsService {
         [fromUserId, toUserId],
       );
 
+      // جلب معلومات المرسل للإشعار
+      const senderInfo = await client.query(
+        `SELECT id, username, "displayName", avatar, "numericId" FROM "User" WHERE id = $1`,
+        [fromUserId]
+      );
+      
+      // إرسال إشعار فوري عبر Redis
+      if (senderInfo.rows.length > 0) {
+        const sender = senderInfo.rows[0];
+        await this.redis.publish('friend:request:new', JSON.stringify({
+          requestId: result.rows[0].id,
+          fromUserId: fromUserId,
+          toUserId: toUserId,
+          fromUserName: sender.displayName || sender.username,
+          fromUserAvatar: sender.avatar,
+          fromUserCustomId: sender.numericId,
+        }));
+        console.log(`📤 Friend request notification sent to Redis for user ${toUserId}`);
+      }
+
+      console.log(`✅ Friend request created successfully`);
       return {
         success: true,
         message: "تم إرسال طلب الصداقة بنجاح",
         data: result.rows[0],
       };
+    } catch (error) {
+      console.error(`❌ Error in sendFriendRequest:`, error);
+      throw error;
     } finally {
-      client.release();
+      if (client) client.release();
     }
   }
 
@@ -184,7 +229,10 @@ export class FriendsService {
       // جلب الطلب
       const requestResult = await client.query(
         `
-        SELECT * FROM friend_requests WHERE id = $1 AND to_user_id = $2 AND status = 'pending'
+        SELECT fr.*, u."displayName" as accepter_name 
+        FROM friend_requests fr
+        JOIN "User" u ON u.id = fr.to_user_id
+        WHERE fr.id = $1 AND fr.to_user_id = $2 AND fr.status = 'pending'
       `,
         [requestId, userId],
       );
@@ -216,11 +264,33 @@ export class FriendsService {
         [request.from_user_id, request.to_user_id],
       );
 
+      // إنشاء إشعار للمرسل
+      await client.query(
+        `
+        INSERT INTO "Notification" ("id", "userId", "type", "title", "body", "data", "createdAt")
+        VALUES (gen_random_uuid(), $1, 'FRIEND_REQUEST_ACCEPTED', 'تم قبول طلب الصداقة', $2, $3, NOW())
+      `,
+        [
+          request.from_user_id,
+          `${request.accepter_name} قبل طلب صداقتك`,
+          JSON.stringify({ accepterId: userId, accepterName: request.accepter_name }),
+        ],
+      );
+
       await client.query("COMMIT");
+      
+      // إرسال إشعار فوري عبر Redis
+      await this.redis.publish('friend:request:accepted', JSON.stringify({
+        fromUserId: userId,
+        toUserId: request.from_user_id,
+        fromUserName: request.accepter_name,
+      }));
+      console.log(`📤 Friend accepted notification sent to Redis for user ${request.from_user_id}`);
 
       return {
         success: true,
         message: "تم قبول طلب الصداقة",
+        acceptedUserId: request.from_user_id,
       };
     } catch (error) {
       await client.query("ROLLBACK");

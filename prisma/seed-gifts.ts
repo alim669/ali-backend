@@ -157,13 +157,23 @@ async function main() {
       sortOrder: 15,
     },
     {
+      id: 'ferrari_vip',
+      name: 'Ferrari VIP',
+      description: 'سيارة فيراري فاخرة VIP',
+      type: GiftType.VIDEO_VIP,
+      imageUrl: '🏎️',
+      videoUrl: 'assets/gifts/ferrari_vip.mp4',
+      price: 15000,
+      sortOrder: 16,
+    },
+    {
       id: 'legendary_galaxy',
       name: 'المجرة',
       description: 'مجرة كاملة',
       type: GiftType.VIDEO_VIP,
       imageUrl: '🌌',
       price: 25000,
-      sortOrder: 16,
+      sortOrder: 17,
     },
     {
       id: 'legendary_diamond_throne',
@@ -172,7 +182,7 @@ async function main() {
       type: GiftType.VIDEO_VIP,
       imageUrl: '💎',
       price: 50000,
-      sortOrder: 17,
+      sortOrder: 18,
     },
     {
       id: 'legendary_universe',
@@ -181,7 +191,7 @@ async function main() {
       type: GiftType.VIDEO_VIP,
       imageUrl: '👑',
       price: 100000,
-      sortOrder: 18,
+      sortOrder: 19,
     },
   ];
 

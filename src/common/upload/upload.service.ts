@@ -17,10 +17,11 @@ export class UploadService {
   private readonly baseUrl: string;
 
   constructor(private configService: ConfigService) {
-    this.uploadDir = this.configService.get<string>(
-      "UPLOAD_DIR",
-      "/var/www/uploads",
-    );
+    this.uploadDir =
+      this.configService.get<string>("UPLOAD_DIR") ||
+      this.configService.get<string>("UPLOAD_DEST") ||
+      this.configService.get<string>("upload.destination") ||
+      "./uploads";
     this.baseUrl = this.configService.get<string>(
       "BASE_URL",
       "http://167.235.64.220",
@@ -32,26 +33,130 @@ export class UploadService {
   }
 
   private ensureDirectories() {
-    const dirs = ["avatars", "rooms", "messages", "gifts"];
+    if (!fs.existsSync(this.uploadDir)) {
+      fs.mkdirSync(this.uploadDir, { recursive: true });
+      this.ensureWritable(this.uploadDir);
+    }
+    const dirs = [
+      "avatars",
+      "rooms",
+      "messages",
+      "gifts",
+      "room_music",
+      "audio",
+      "videos",
+      "explore",
+    ];
     for (const dir of dirs) {
       const fullPath = path.join(this.uploadDir, dir);
       if (!fs.existsSync(fullPath)) {
         fs.mkdirSync(fullPath, { recursive: true });
+        this.ensureWritable(fullPath);
       }
     }
+  }
+
+  private ensureWritable(targetPath: string) {
+    try {
+      fs.accessSync(targetPath, fs.constants.W_OK);
+    } catch (error) {
+      try {
+        fs.chmodSync(targetPath, 0o775);
+        fs.accessSync(targetPath, fs.constants.W_OK);
+      } catch (innerError) {
+        this.logger.error(
+          `Upload path is not writable: ${targetPath}`,
+        );
+        throw new BadRequestException(
+          `Upload path is not writable: ${targetPath}. Ensure the running user has write permissions.`,
+        );
+      }
+    }
+  }
+
+  private sanitizeFolder(folder: string) {
+    const trimmed = (folder || "general").trim();
+    const safe = trimmed.replace(/\\/g, "/").replace(/\.+/g, "");
+    return safe.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\/+?/g, "/") || "general";
+  }
+
+  private buildPublicUrl(safeFolder: string, filename: string) {
+    const base = this.baseUrl.replace(/\/+$/, "");
+    const safeSegments = safeFolder
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment));
+    const encodedFolder = safeSegments.join("/");
+    const encodedFile = encodeURIComponent(filename);
+    return `${base}/uploads/${encodedFolder}/${encodedFile}`;
+  }
+
+  private async ensureFolderExists(folder: string) {
+    const safeFolder = this.sanitizeFolder(folder || "general");
+    if (!fs.existsSync(this.uploadDir)) {
+      await fs.promises.mkdir(this.uploadDir, { recursive: true });
+      this.ensureWritable(this.uploadDir);
+    }
+    const fullPath = path.join(this.uploadDir, safeFolder);
+    if (!fs.existsSync(fullPath)) {
+      await fs.promises.mkdir(fullPath, { recursive: true });
+      this.ensureWritable(fullPath);
+    }
+    return { safeFolder, fullPath };
   }
 
   async uploadImage(
     file: Express.Multer.File,
     folder: string = "general",
   ): Promise<UploadResult> {
+    const { safeFolder } = await this.ensureFolderExists(folder);
     const filename = `${uuidv4()}${path.extname(file.originalname)}`;
-    const filePath = path.join(this.uploadDir, folder, filename);
+    const filePath = path.join(this.uploadDir, safeFolder, filename);
 
     await fs.promises.writeFile(filePath, file.buffer);
 
-    const url = `${this.baseUrl}/uploads/${folder}/${filename}`;
+    const url = this.buildPublicUrl(safeFolder, filename);
     this.logger.log(`📤 Image uploaded: ${url}`);
+
+    return {
+      url,
+      filename,
+      path: filePath,
+    };
+  }
+
+  async uploadAudio(
+    file: Express.Multer.File,
+    folder: string = "audio",
+  ): Promise<UploadResult> {
+    const { safeFolder } = await this.ensureFolderExists(folder);
+    const filename = `${uuidv4()}${path.extname(file.originalname)}`;
+    const filePath = path.join(this.uploadDir, safeFolder, filename);
+
+    await fs.promises.writeFile(filePath, file.buffer);
+
+    const url = this.buildPublicUrl(safeFolder, filename);
+    this.logger.log(`🎵 Audio uploaded: ${url}`);
+
+    return {
+      url,
+      filename,
+      path: filePath,
+    };
+  }
+
+  async uploadVideo(
+    file: Express.Multer.File,
+    folder: string = "videos",
+  ): Promise<UploadResult> {
+    const { safeFolder } = await this.ensureFolderExists(folder);
+    const filename = `${uuidv4()}${path.extname(file.originalname) || ".mp4"}`;
+    const filePath = path.join(this.uploadDir, safeFolder, filename);
+
+    await fs.promises.writeFile(filePath, file.buffer);
+
+    const url = this.buildPublicUrl(safeFolder, filename);
+    this.logger.log(`🎬 Video uploaded: ${url}`);
 
     return {
       url,
@@ -64,6 +169,7 @@ export class UploadService {
     file: Express.Multer.File,
     userId: string,
   ): Promise<UploadResult> {
+    await this.ensureFolderExists("avatars");
     const ext = path.extname(file.originalname) || ".jpg";
     const filename = `avatar_${userId}${ext}`;
     const filePath = path.join(this.uploadDir, "avatars", filename);
@@ -96,6 +202,7 @@ export class UploadService {
     file: Express.Multer.File,
     roomId: string,
   ): Promise<UploadResult> {
+    await this.ensureFolderExists("rooms");
     const ext = path.extname(file.originalname) || ".jpg";
     const filename = `room_${roomId}${ext}`;
     const filePath = path.join(this.uploadDir, "rooms", filename);

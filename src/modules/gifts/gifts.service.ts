@@ -26,6 +26,11 @@ import { v4 as uuidv4 } from "uuid";
 @Injectable()
 export class GiftsService {
   private readonly logger = new Logger(GiftsService.name);
+  private readonly giftRevenueSplit = {
+    receiver: 0.3,
+    roomOwner: 0.3,
+    app: 0.4,
+  };
 
   constructor(
     private prisma: PrismaService,
@@ -33,6 +38,22 @@ export class GiftsService {
     private cache: CacheService,
     private messagesService: MessagesService,
   ) {}
+
+  private toBigInt(amount: number) {
+    if (!Number.isFinite(amount)) {
+      throw new BadRequestException("قيمة غير صالحة");
+    }
+    return BigInt(Math.trunc(amount));
+  }
+
+  private toNumber(value: bigint | number | null | undefined) {
+    if (value === null || value === undefined) return 0;
+    return typeof value === "bigint" ? Number(value) : value;
+  }
+
+  private toPrismaBigInt(value: bigint) {
+    return value as unknown as number;
+  }
 
   // ================================
   // GET ALL GIFTS
@@ -45,7 +66,7 @@ export class GiftsService {
     // Try cache first for default query (all active gifts)
     if (page === 1 && !type && isActive === true) {
       const cached = await this.cache.getCachedGiftsList<any>();
-      if (cached) {
+      if (cached && Array.isArray(cached) && cached.length > 0) {
         return {
           data: cached,
           meta: {
@@ -162,6 +183,16 @@ export class GiftsService {
   }
 
   // ================================
+  // CLEAR CACHE (ADMIN)
+  // ================================
+
+  async clearCache() {
+    await this.cache.invalidateGifts();
+    this.logger.log(`Gifts cache cleared`);
+    return { message: "تم مسح cache الهدايا بنجاح" };
+  }
+
+  // ================================
   // SEND GIFT (WITH IDEMPOTENCY & TRANSACTION)
   // ================================
 
@@ -210,10 +241,20 @@ export class GiftsService {
 
     const quantity = dto.quantity || 1;
     const totalPrice = gift.price * quantity;
+    const totalPriceBig = this.toBigInt(totalPrice);
+    const totalPriceInput = this.toPrismaBigInt(totalPriceBig);
 
     // Execute in transaction
     const result = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
+        const room = dto.roomId
+          ? await tx.room.findUnique({
+              where: { id: dto.roomId },
+              select: { ownerId: true },
+            })
+          : null;
+        const roomOwnerId = room?.ownerId ?? null;
+
         // Get sender wallet with lock (SELECT FOR UPDATE)
         const senderWallet = await tx.wallet.findUnique({
           where: { userId: senderId },
@@ -223,7 +264,7 @@ export class GiftsService {
           throw new BadRequestException("المحفظة غير موجودة");
         }
 
-        if (senderWallet.balance < totalPrice) {
+        if (senderWallet.balance < totalPriceBig) {
           throw new BadRequestException("رصيد غير كافي");
         }
 
@@ -243,14 +284,35 @@ export class GiftsService {
           });
         }
 
-        // Calculate receiver amount (e.g., 80% of gift value)
-        const receiverAmount = Math.floor(totalPrice * 0.8);
+        // Calculate revenue split (receiver + room owner + app)
+        let receiverAmount = Math.floor(
+          totalPrice * this.giftRevenueSplit.receiver,
+        );
+        let ownerAmount = roomOwnerId
+          ? Math.floor(totalPrice * this.giftRevenueSplit.roomOwner)
+          : 0;
+
+        if (roomOwnerId && roomOwnerId === dto.receiverId) {
+          receiverAmount += ownerAmount;
+          ownerAmount = 0;
+        }
+
+        let appAmount = totalPrice - receiverAmount - ownerAmount;
+        if (appAmount < 0) {
+          receiverAmount += appAmount;
+          appAmount = 0;
+        }
+
+        const receiverAmountBig = this.toBigInt(receiverAmount);
+        const receiverAmountInput = this.toPrismaBigInt(receiverAmountBig);
+        const ownerAmountBig = this.toBigInt(ownerAmount);
+        const ownerAmountInput = this.toPrismaBigInt(ownerAmountBig);
 
         // Deduct from sender
         const updatedSenderWallet = await tx.wallet.update({
           where: { id: senderWallet.id },
           data: {
-            balance: { decrement: totalPrice },
+            balance: { decrement: totalPriceInput },
             version: { increment: 1 },
           },
         });
@@ -259,10 +321,41 @@ export class GiftsService {
         const updatedReceiverWallet = await tx.wallet.update({
           where: { id: receiverWallet.id },
           data: {
-            balance: { increment: receiverAmount },
+            balance: { increment: receiverAmountInput },
             version: { increment: 1 },
           },
         });
+
+        let updatedOwnerWallet = null;
+        let ownerWalletBefore: { id: string; balance: number } | null = null;
+        if (roomOwnerId && ownerAmount > 0) {
+          let ownerWallet = await tx.wallet.findUnique({
+            where: { userId: roomOwnerId },
+          });
+
+          if (!ownerWallet) {
+            ownerWallet = await tx.wallet.create({
+              data: {
+                userId: roomOwnerId,
+                balance: 0,
+                diamonds: 0,
+              },
+            });
+          }
+
+          ownerWalletBefore = {
+            id: ownerWallet.id,
+            balance: this.toNumber(ownerWallet.balance as any),
+          };
+
+          updatedOwnerWallet = await tx.wallet.update({
+            where: { id: ownerWallet.id },
+            data: {
+              balance: { increment: ownerAmountInput },
+              version: { increment: 1 },
+            },
+          });
+        }
 
         // Create gift send record
         const giftSend = await tx.giftSend.create({
@@ -284,7 +377,7 @@ export class GiftsService {
             walletId: senderWallet.id,
             type: TransactionType.GIFT_SENT,
             status: TransactionStatus.COMPLETED,
-            amount: -totalPrice,
+            amount: this.toPrismaBigInt(-totalPriceBig),
             balanceBefore: senderWallet.balance,
             balanceAfter: updatedSenderWallet.balance,
             referenceType: "gift_send",
@@ -299,7 +392,7 @@ export class GiftsService {
             walletId: receiverWallet.id,
             type: TransactionType.GIFT_RECEIVED,
             status: TransactionStatus.COMPLETED,
-            amount: receiverAmount,
+            amount: receiverAmountInput,
             balanceBefore: receiverWallet.balance,
             balanceAfter: updatedReceiverWallet.balance,
             referenceType: "gift_send",
@@ -308,10 +401,32 @@ export class GiftsService {
           },
         });
 
+        if (
+          updatedOwnerWallet &&
+          roomOwnerId &&
+          ownerAmount > 0 &&
+          ownerWalletBefore
+        ) {
+          await tx.walletTransaction.create({
+            data: {
+              walletId: ownerWalletBefore.id,
+              type: TransactionType.GIFT_RECEIVED,
+              status: TransactionStatus.COMPLETED,
+              amount: ownerAmountInput,
+              balanceBefore: ownerWalletBefore.balance,
+              balanceAfter: updatedOwnerWallet.balance,
+              referenceType: "gift_room_owner_share",
+              referenceId: giftSend.id,
+              description: `حصة مالك الغرفة من هدية "${gift.name}"`,
+            },
+          });
+        }
+
         return {
           giftSend,
           senderBalance: updatedSenderWallet.balance,
           gift,
+          roomOwnerId,
         };
       },
     );
@@ -347,10 +462,21 @@ export class GiftsService {
       `Gift sent: ${result.giftSend.id} from ${senderId} to ${dto.receiverId}`,
     );
 
+    // Invalidate user caches to refresh balances
+    await this.cache.invalidateUser(senderId);
+    await this.cache.invalidateUser(dto.receiverId);
+    if (
+      result.roomOwnerId &&
+      result.roomOwnerId !== senderId &&
+      result.roomOwnerId !== dto.receiverId
+    ) {
+      await this.cache.invalidateUser(result.roomOwnerId);
+    }
+
     return {
       success: true,
       giftSend: result.giftSend,
-      newBalance: result.senderBalance,
+      newBalance: this.toNumber(result.senderBalance),
     };
   }
 

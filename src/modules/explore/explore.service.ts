@@ -91,7 +91,7 @@ export class ExploreService implements OnModuleInit {
       userId: post.userId,
       userName: post.userName,
       userHandle: post.userHandle,
-      verificationType: post.user?.verificationType || post.verificationType,
+      verificationType: post.user?.verification?.type || post.verificationType,
       caption: post.caption,
       tags: post.tags || [],
       country: post.country || "IQ",
@@ -248,7 +248,11 @@ export class ExploreService implements OnModuleInit {
       take: limit,
       include: {
         user: {
-          select: { verificationType: true }
+          include: {
+            verification: {
+              select: { type: true }
+            }
+          }
         }
       }
     });
@@ -299,7 +303,11 @@ export class ExploreService implements OnModuleInit {
       take: limit,
       include: {
         user: {
-          select: { verificationType: true }
+          include: {
+            verification: {
+              select: { type: true }
+            }
+          }
         }
       }
     });

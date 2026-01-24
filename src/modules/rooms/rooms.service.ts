@@ -10,6 +10,7 @@ import * as argon2 from "argon2";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { RedisService } from "../../common/redis/redis.service";
 import { CacheService, CACHE_TTL } from "../../common/cache/cache.service";
+import { AppGateway } from "../websocket/app.gateway";
 import {
   CreateRoomDto,
   UpdateRoomDto,
@@ -35,6 +36,7 @@ export class RoomsService {
     private prisma: PrismaService,
     private redis: RedisService,
     private cache: CacheService,
+    private gateway: AppGateway,
   ) {}
 
   // ================================
@@ -82,10 +84,11 @@ export class RoomsService {
       },
     );
 
-    this.logger.log(`User ${userId} created room ${room.id}`);
+    this.logger.log(`User ${userId} created room ${room.id} (numericId: ${room.numericId})`);
 
     return {
       id: room.id,
+      numericId: room.numericId,
       name: room.name,
       description: room.description,
       avatar: room.avatar,
@@ -93,6 +96,7 @@ export class RoomsService {
       maxMembers: room.maxMembers,
       currentMembers: room.currentMembers,
       isPasswordProtected: room.isPasswordProtected,
+      ownerId: userId, // 🔐 إضافة ownerId في الاستجابة
       createdAt: room.createdAt,
     };
   }
@@ -134,6 +138,7 @@ export class RoomsService {
         where,
         select: {
           id: true,
+          numericId: true,
           name: true,
           description: true,
           avatar: true,
@@ -141,6 +146,7 @@ export class RoomsService {
           maxMembers: true,
           currentMembers: true,
           isPasswordProtected: true,
+          ownerId: true, // 🔐 إضافة ownerId مباشرة
           createdAt: true,
           owner: {
             select: {
@@ -159,6 +165,11 @@ export class RoomsService {
     ]);
 
     this.logger.log(`🔍 findAll found ${rooms.length} rooms (total: ${total})`);
+    
+    // Log numericIds for debugging
+    rooms.forEach(room => {
+      this.logger.log(`  Room: ${room.id.substring(0, 15)}... numericId=${room.numericId}`);
+    });
 
     // Add online counts from Redis
     const roomsWithOnline = await Promise.all(
@@ -230,6 +241,8 @@ export class RoomsService {
     // Get online users
     const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
 
+    this.logger.log(`📦 findById: room.id=${room.id}, numericId=${room.numericId}`);
+
     return {
       ...room,
       passwordHash: undefined, // Never expose
@@ -255,6 +268,7 @@ export class RoomsService {
       data: dto,
       select: {
         id: true,
+        numericId: true,
         name: true,
         description: true,
         avatar: true,
@@ -266,6 +280,16 @@ export class RoomsService {
     await this.cache.invalidateRoom(roomId);
 
     this.logger.log(`User ${userId} updated room ${roomId}`);
+
+    // Notify room members via WebSocket
+    await this.gateway.notifyRoomUpdated(roomId, {
+      roomId,
+      avatar: updated.avatar,
+      name: updated.name,
+      description: updated.description,
+      settings: dto.settings ?? {},
+      backgroundUrl: dto.settings?.backgroundUrl,
+    }, userId);
 
     return updated;
   }
@@ -561,6 +585,12 @@ export class RoomsService {
               username: true,
               displayName: true,
               avatar: true,
+              verification: {
+                select: {
+                  type: true,
+                  expiresAt: true,
+                },
+              },
             },
           },
         },
@@ -576,8 +606,9 @@ export class RoomsService {
       }),
     ]);
 
-    // Add online status
+    // Add online status and verification type
     const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
+    const now = new Date();
     const membersWithOnline = members.map(
       (
         m: RoomMember & {
@@ -586,12 +617,18 @@ export class RoomsService {
             username: string;
             displayName: string | null;
             avatar: string | null;
+            verification: { type: string; expiresAt: Date } | null;
           };
         },
-      ) => ({
-        ...m,
-        isOnline: onlineUsers.includes(m.userId),
-      }),
+      ) => {
+        const hasActiveVerification = m.user.verification && 
+          new Date(m.user.verification.expiresAt) > now;
+        return {
+          ...m,
+          isOnline: onlineUsers.includes(m.userId),
+          verificationType: hasActiveVerification ? m.user.verification?.type : null,
+        };
+      },
     );
 
     return {

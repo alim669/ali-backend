@@ -148,6 +148,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+
   async del(key: string): Promise<void> {
     if (!this.isEnabled()) {
       this.memoryCache.delete(key);
@@ -512,6 +513,62 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client!.lrange(key, start, stop);
   }
 
+  async lrem(key: string, count: number, value: string): Promise<number> {
+    if (!this.isEnabled()) {
+      const list = this.memoryLists.get(key) || [];
+      if (list.length === 0) return 0;
+
+      let removed = 0;
+      if (count === 0) {
+        const filtered = list.filter((item) => {
+          if (item === value) {
+            removed += 1;
+            return false;
+          }
+          return true;
+        });
+        this.memoryLists.set(key, filtered);
+        return removed;
+      }
+
+      const result: string[] = [];
+      if (count > 0) {
+        for (const item of list) {
+          if (item === value && removed < count) {
+            removed += 1;
+            continue;
+          }
+          result.push(item);
+        }
+      } else {
+        const limit = Math.abs(count);
+        for (let i = list.length - 1; i >= 0; i -= 1) {
+          const item = list[i];
+          if (item === value && removed < limit) {
+            removed += 1;
+            continue;
+          }
+          result.unshift(item);
+        }
+      }
+
+      this.memoryLists.set(key, result);
+      return removed;
+    }
+    return this.client!.lrem(key, count, value);
+  }
+
+  async rpop(key: string): Promise<string | null> {
+    if (!this.isEnabled()) {
+      const list = this.memoryLists.get(key);
+      if (!list || list.length === 0) return null;
+      const value = list.pop() || null;
+      this.memoryLists.set(key, list);
+      return value;
+    }
+    return this.client!.rpop(key);
+  }
+
   // ================================
   // Presence Operations
   // ================================
@@ -520,6 +577,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     userId: string,
     socketId: string,
     metadata?: object,
+    ttlSeconds: number = 120,
   ): Promise<void> {
     const key = `presence:user:${userId}`;
     const data = {
@@ -527,11 +585,42 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       lastSeen: Date.now(),
       ...metadata,
     };
-    await this.setJson(key, data, 300); // 5 minutes TTL
+    await this.setJson(key, data, ttlSeconds);
+    await this.sadd("presence:users", userId);
   }
 
   async setUserOffline(userId: string): Promise<void> {
     await this.del(`presence:user:${userId}`);
+    await this.del(`presence:user:${userId}:sockets`);
+    await this.srem("presence:users", userId);
+  }
+
+  async addUserSocket(
+    userId: string,
+    socketId: string,
+    ttlSeconds: number = 120,
+  ): Promise<void> {
+    const key = `presence:user:${userId}:sockets`;
+    await this.sadd(key, socketId);
+    await this.expire(key, ttlSeconds);
+    await this.sadd("presence:users", userId);
+  }
+
+  async removeUserSocket(userId: string, socketId: string): Promise<void> {
+    const key = `presence:user:${userId}:sockets`;
+    await this.srem(key, socketId);
+  }
+
+  async getUserSockets(userId: string): Promise<string[]> {
+    return this.smembers(`presence:user:${userId}:sockets`);
+  }
+
+  async getUserSocketCount(userId: string): Promise<number> {
+    return this.scard(`presence:user:${userId}:sockets`);
+  }
+
+  async getOnlineUsers(): Promise<string[]> {
+    return this.smembers("presence:users");
   }
 
   async getUserPresence(userId: string): Promise<any> {

@@ -268,7 +268,7 @@ export class PrivateChatsService implements OnModuleInit {
           END as other_user_id,
           u."displayName" as other_user_name,
           u.avatar as other_user_avatar,
-          u."verificationType" as other_user_verification_type,
+          v.type as other_user_verification_type,
           false as other_user_online,
           (
             SELECT COUNT(*) FROM private_messages pm 
@@ -281,6 +281,7 @@ export class PrivateChatsService implements OnModuleInit {
           ) as last_message
         FROM private_chats pc
         JOIN "User" u ON u.id = CASE WHEN pc.user1_id = $1 THEN pc.user2_id ELSE pc.user1_id END
+        LEFT JOIN "Verification" v ON v."userId" = u.id AND v.status = 'ACTIVE'
         WHERE pc.user1_id = $1 OR pc.user2_id = $1
         ORDER BY pc.last_message_at DESC NULLS LAST
         `,

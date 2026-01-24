@@ -639,13 +639,19 @@ export class AuthService {
         role: true,
         status: true,
         emailVerified: true,
+        // حقول الحظر
+        banReason: true,
+        bannedAt: true,
+        bannedUntil: true,
       },
     });
 
-    if (!user || user.status === UserStatus.BANNED) {
+    if (!user) {
       return null;
     }
 
+    // السماح للمستخدم المحظور بالوصول لرؤية شاشة الحظر
+    // لكن سيتم حظره من العمليات الأخرى في guards منفصلة
     return user;
   }
 }

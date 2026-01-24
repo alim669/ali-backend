@@ -15,6 +15,7 @@ import {
   DeductDto,
   AdminAdjustBalanceDto,
   TransactionQueryDto,
+  TransferByCustomIdDto,
 } from "./dto/wallets.dto";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
@@ -65,6 +66,15 @@ export class WalletsController {
   @ApiOperation({ summary: "خصم رصيد (للشراء من المتجر)" })
   async deduct(@CurrentUser("id") userId: string, @Body() dto: DeductDto) {
     return this.walletsService.deduct(userId, dto);
+  }
+
+  @Post("transfer/by-custom-id")
+  @ApiOperation({ summary: "تحويل رصيد باستخدام الـ ID الرقمي" })
+  async transferByCustomId(
+    @CurrentUser("id") userId: string,
+    @Body() dto: TransferByCustomIdDto,
+  ) {
+    return this.walletsService.transferByCustomId(userId, dto);
   }
 
   // ================================

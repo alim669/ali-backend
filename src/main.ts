@@ -3,6 +3,10 @@ import { ValidationPipe, Logger, VersioningType } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
 import helmet from "helmet";
+import * as express from "express";
+import { Request, Response, NextFunction } from "express";
+import * as fs from "fs";
+import * as path from "path";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import {
@@ -22,19 +26,24 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>("PORT", 3000);
   const nodeEnv = configService.get<string>("NODE_ENV", "development");
+  const uploadDir =
+    configService.get<string>("UPLOAD_DIR") ||
+    configService.get<string>("UPLOAD_DEST") ||
+    configService.get<string>("upload.destination") ||
+    "./uploads";
 
   // Security Headers - متقدم
   app.use(
     helmet({
       contentSecurityPolicy: nodeEnv === "production" ? undefined : false,
       crossOriginEmbedderPolicy: false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
     }),
   );
 
-  // CORS - إعدادات متقدمة
-  const corsOrigins = configService.get<string>("CORS_ORIGINS", "*");
+  // CORS - السماح لجميع المصادر
   app.enableCors({
-    origin: corsOrigins === "*" ? true : corsOrigins.split(","),
+    origin: true, // السماح لأي origin
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -42,6 +51,8 @@ async function bootstrap() {
       "X-Idempotency-Key",
       "X-Request-ID",
       "Accept-Language",
+      "Origin",
+      "Accept",
     ],
     exposedHeaders: [
       "X-Request-ID",
@@ -50,6 +61,8 @@ async function bootstrap() {
     ],
     credentials: true,
     maxAge: 86400, // 24 hours
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   // Global Validation Pipe - متقدم
@@ -77,6 +90,32 @@ async function bootstrap() {
     new TimeoutInterceptor(),
     new LoggingInterceptor(),
     new TransformInterceptor(),
+  );
+
+  // Static uploads serving (must be public and reachable)
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  
+  // CORS middleware for static files (required for video playback on web)
+  app.use("/uploads", (req: Request, res: Response, next: NextFunction) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Range, Content-Type");
+    res.header("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    res.header("Cross-Origin-Resource-Policy", "cross-origin");
+    res.header("Cross-Origin-Embedder-Policy", "unsafe-none");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+  
+  app.use(
+    "/uploads",
+    express.static(path.resolve(uploadDir), {
+      fallthrough: false,
+    }),
   );
 
   // API Prefix and Versioning

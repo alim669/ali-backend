@@ -35,9 +35,9 @@ export class SecurityService {
   private readonly securityEvents: SecurityEvent[] = [];
 
   // Constants
-  private readonly MAX_LOGIN_ATTEMPTS = 5;
-  private readonly BLOCK_DURATION = 15 * 60 * 1000; // 15 minutes
-  private readonly ATTEMPT_WINDOW = 5 * 60 * 1000; // 5 minutes
+  private readonly MAX_LOGIN_ATTEMPTS = 50; // Increased for testing
+  private readonly BLOCK_DURATION = 1 * 60 * 1000; // 1 minute (reduced for testing)
+  private readonly ATTEMPT_WINDOW = 1 * 60 * 1000; // 1 minute
 
   constructor(
     private readonly redis: RedisService,

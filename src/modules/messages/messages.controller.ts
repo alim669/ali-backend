@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
+import { SkipThrottle } from "@nestjs/throttler";
 import { MessagesService } from "./messages.service";
 import { SendMessageDto, MessageQueryDto } from "./dto/messages.dto";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
@@ -32,6 +33,7 @@ export class MessagesController {
   }
 
   @Get()
+  @SkipThrottle()
   @ApiOperation({ summary: "جلب الرسائل" })
   async getMessages(
     @Param("roomId") roomId: string,

@@ -52,17 +52,17 @@ import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
         {
           name: "short",
           ttl: 1000,
-          limit: 50,
+          limit: 100,
         },
         {
           name: "medium",
           ttl: 60000,
-          limit: config.get<number>("THROTTLE_LIMIT", 300),
+          limit: config.get<number>("THROTTLE_LIMIT", 600),
         },
         {
           name: "long",
           ttl: 3600000,
-          limit: 5000,
+          limit: 10000,
         }
         
       ],

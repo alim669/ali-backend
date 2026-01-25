@@ -3622,15 +3622,36 @@ export class AppGateway
     receiverId: string,
     giftData: any,
   ) {
+    this.logger.log(`🎁🚀 notifyGiftSent called - roomId: ${roomId}, sender: ${senderId}, receiver: ${receiverId}`);
+    
     if (roomId) {
+      // استخدام unified broadcast system للتأكد من وصول الهدية لكل المستخدمين
+      const giftEvent = {
+        type: "gift" as const,
+        roomId,
+        id: giftData.id || this.generateEventId(),
+        senderId,
+        senderName: giftData.senderName || "Unknown",
+        senderAvatar: giftData.senderAvatar,
+        serverTs: Date.now(),
+        data: giftData,
+      };
+      
+      this.logger.log(`🎁📡 Broadcasting gift to room:${roomId} via unified system`);
+      
+      // بث عبر الـ unified system (room_event)
+      this.broadcastRoomEvent(roomId, giftEvent);
+      
+      // بث إضافي للتأكد من وصول الهدية (backwards compatibility)
       this.server.to(`room:${roomId}`).emit("gift_sent", giftData);
+      this.server.to(`room:${roomId}`).emit("giftSent", giftData);
+      
+      this.logger.log(`🎁✅ Gift broadcast complete to room:${roomId}`);
     }
+    
+    // إشعار المستلم مباشرة
     this.server.to(`user:${receiverId}`).emit("gift_received", giftData);
-
-    // Publish to Redis for other instances
-    await this.redis.publish("gifts:sent", {
-      data: { ...giftData, roomId, receiverId },
-    });
+    this.logger.log(`🎁📥 Gift notification sent to user:${receiverId}`);
   }
 
   // ================================

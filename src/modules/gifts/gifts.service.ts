@@ -4,11 +4,14 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  Inject,
+  forwardRef,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { RedisService } from "../../common/redis/redis.service";
 import { CacheService, CACHE_TTL } from "../../common/cache/cache.service";
 import { MessagesService } from "../messages/messages.service";
+import { AppGateway } from "../websocket/app.gateway";
 import {
   CreateGiftDto,
   UpdateGiftDto,
@@ -37,6 +40,8 @@ export class GiftsService {
     private redis: RedisService,
     private cache: CacheService,
     private messagesService: MessagesService,
+    @Inject(forwardRef(() => AppGateway))
+    private appGateway: AppGateway,
   ) {}
 
   private toBigInt(amount: number) {
@@ -480,9 +485,37 @@ export class GiftsService {
         totalPrice: result.giftSend.totalPrice,
       },
     };
-    this.logger.log(`🎁📡 Publishing gift event to Redis gifts:sent for room ${dto.roomId}`);
-    await this.redis.publish("gifts:sent", giftEventPayload);
-    this.logger.log(`🎁✅ Gift event published successfully`);
+    
+    // 🎁 DUAL BROADCAST: بث مباشر عبر WebSocket + Redis pub/sub للتأكد من الوصول
+    this.logger.log(`🎁📡 Broadcasting gift directly via WebSocket Gateway for room ${dto.roomId}`);
+    
+    // بث مباشر عبر Gateway (يضمن وصول الهدية لكل المستخدمين في الغرفة)
+    if (dto.roomId) {
+      await this.appGateway.notifyGiftSent(
+        dto.roomId,
+        senderId,
+        dto.receiverId,
+        {
+          id: result.giftSend.id,
+          roomId: dto.roomId,
+          senderId,
+          senderName: sender.displayName,
+          senderAvatar: sender.avatar,
+          receiverId: dto.receiverId,
+          receiverName: receiver.displayName,
+          receiverAvatar: receiver.avatar,
+          giftId: result.gift.id,
+          giftName: result.gift.name,
+          giftImage: result.gift.imageUrl,
+          giftPrice: result.gift.price,
+          quantity: result.giftSend.quantity,
+          totalValue: result.giftSend.totalPrice,
+          createdAt: new Date().toISOString(),
+        }
+      );
+    }
+    
+    this.logger.log(`🎁✅ Gift broadcast complete for room ${dto.roomId}`);
 
     this.logger.log(
       `Gift sent: ${result.giftSend.id} from ${senderId} to ${dto.receiverId}`,

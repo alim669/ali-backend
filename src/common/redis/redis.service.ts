@@ -24,6 +24,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     string,
     ((message: string) => void)[]
   >();
+  
+  // Track Redis channel callbacks
+  private channelCallbacks = new Map<string, ((message: string) => void)[]>();
+  private messageHandlerRegistered = false;
 
   constructor(private configService: ConfigService) {}
 
@@ -325,12 +329,34 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Subscribed to ${channel} (in-memory)`);
       return;
     }
+    
+    // Register the unified message handler once
+    if (!this.messageHandlerRegistered) {
+      this.subscriber!.on("message", (ch, message) => {
+        const callbacks = this.channelCallbacks.get(ch);
+        if (callbacks) {
+          callbacks.forEach(cb => {
+            try {
+              cb(message);
+            } catch (e) {
+              this.logger.error(`Error in channel callback for ${ch}: ${e}`);
+            }
+          });
+        }
+      });
+      this.messageHandlerRegistered = true;
+      this.logger.log('📡 Registered unified Redis message handler');
+    }
+    
+    // Track callback for this channel
+    if (!this.channelCallbacks.has(channel)) {
+      this.channelCallbacks.set(channel, []);
+    }
+    this.channelCallbacks.get(channel)!.push(callback);
+    
+    // Subscribe to Redis channel
     await this.subscriber!.subscribe(channel);
-    this.subscriber!.on("message", (ch, message) => {
-      if (ch === channel) {
-        callback(message);
-      }
-    });
+    this.logger.log(`📡 Subscribed to Redis channel: ${channel}`);
   }
 
   async unsubscribe(channel: string): Promise<void> {
@@ -338,7 +364,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       this.memorySubscriptions.delete(channel);
       return;
     }
+    this.channelCallbacks.delete(channel);
     await this.subscriber!.unsubscribe(channel);
+    this.logger.log(`📡 Unsubscribed from Redis channel: ${channel}`);
   }
 
   // ================================

@@ -41,6 +41,7 @@ import { ExploreModule } from "./modules/explore/explore.module";
 import { DiceGameModule } from "./modules/games/dice/dice-game.module";
 import { NameIconsModule } from "./modules/name-icons/name-icons.module";
 import { AppealsModule } from "./modules/appeals/appeals.module";
+import { AgoraModule } from "./modules/agora/agora.module";
 
 // Guards
 import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
@@ -121,6 +122,7 @@ import { configuration, envValidationSchema } from "./config";
     DiceGameModule,
     NameIconsModule,
     AppealsModule,
+    AgoraModule,
     CleanupModule,
     ScheduledTasksModule,
   ],

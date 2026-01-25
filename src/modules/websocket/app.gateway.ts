@@ -3353,6 +3353,7 @@ export class AppGateway
     // Subscribe to gift events from other instances
     await this.redis.subscribe("gifts:sent", (message) => {
       try {
+        this.logger.log(`🎁📥 Received gift event from Redis: ${message.substring(0, 200)}...`);
         const parsedMessage = JSON.parse(message);
         const giftData = parsedMessage.data;
 
@@ -3376,7 +3377,7 @@ export class AppGateway
             createdAt: new Date().toISOString(),
           };
 
-          this.logger.debug(`📡 Broadcasting gift to room:${giftData.roomId} - from ${giftEventData.senderName} to ${giftEventData.receiverName}`);
+          this.logger.log(`🎁📡 Broadcasting gift to room:${giftData.roomId} - from ${giftEventData.senderName} to ${giftEventData.receiverName}`);
 
           // Broadcast using unified event system
           this.broadcastRoomEvent(giftData.roomId, {
@@ -3389,6 +3390,10 @@ export class AppGateway
             serverTs: Date.now(),
             data: giftEventData,
           });
+          
+          this.logger.log(`🎁✅ Gift broadcast complete for room:${giftData.roomId}`);
+        } else {
+          this.logger.warn(`🎁⚠️ Gift event missing roomId: ${JSON.stringify(giftData)}`);
         }
 
         // Also notify receiver directly

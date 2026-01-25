@@ -458,7 +458,7 @@ export class GiftsService {
     }
 
     // Publish gift event for WebSocket
-    await this.redis.publish("gifts:sent", {
+    const giftEventPayload = {
       type: "gift_sent",
       data: {
         giftSend: {
@@ -479,7 +479,10 @@ export class GiftsService {
         quantity: result.giftSend.quantity,
         totalPrice: result.giftSend.totalPrice,
       },
-    });
+    };
+    this.logger.log(`🎁📡 Publishing gift event to Redis gifts:sent for room ${dto.roomId}`);
+    await this.redis.publish("gifts:sent", giftEventPayload);
+    this.logger.log(`🎁✅ Gift event published successfully`);
 
     this.logger.log(
       `Gift sent: ${result.giftSend.id} from ${senderId} to ${dto.receiverId}`,

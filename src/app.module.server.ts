@@ -31,6 +31,7 @@ import { HealthModule } from "./modules/health/health.module";
 import { AgentsModule } from "./modules/agents/agents.module";
 import { PrivateChatsModule } from "./modules/private-chats/private-chats.module";
 import { ExploreModule } from "./modules/explore/explore.module";
+import { AgoraModule } from "./modules/agora/agora.module";
 
 // Guards
 import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
@@ -95,6 +96,7 @@ import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
     AgentsModule,
     PrivateChatsModule,
     ExploreModule,
+    AgoraModule,
   ],
   providers: [
     {

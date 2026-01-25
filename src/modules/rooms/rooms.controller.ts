@@ -141,4 +141,74 @@ export class RoomsController {
   ) {
     return this.roomsService.transferOwnership(id, newOwnerId, userId);
   }
+
+  // ================================
+  // MIC SLOTS API
+  // ================================
+
+  @Get(":id/mic-slots")
+  @ApiOperation({ summary: "الحصول على حالة المايكات" })
+  async getMicSlots(@Param("id") id: string) {
+    return this.roomsService.getMicSlots(id);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/enter")
+  @ApiOperation({ summary: "حجز مايك" })
+  async enterMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.enterMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/leave")
+  @ApiOperation({ summary: "مغادرة المايك" })
+  async leaveMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.leaveMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/lock")
+  @ApiOperation({ summary: "قفل المايك (للمالك فقط)" })
+  async lockMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.lockMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/unlock")
+  @ApiOperation({ summary: "فتح المايك (للمالك فقط)" })
+  async unlockMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.unlockMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/mute")
+  @ApiOperation({ summary: "كتم مستخدم على المايك (للمالك فقط)" })
+  async muteMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.muteMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/kick")
+  @ApiOperation({ summary: "طرد مستخدم من المايك (للمالك فقط)" })
+  async kickFromMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.kickFromMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
 }

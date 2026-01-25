@@ -440,6 +440,14 @@ export class AppGateway
     return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  /**
+   * Emit event to a specific room (public method for other services)
+   */
+  public emitToRoom(roomId: string, event: string, data: any) {
+    this.server.to(`room:${roomId}`).emit(event, data);
+    this.logger.debug(`📡 [EMIT] ${event} -> room:${roomId}`);
+  }
+
   // ================================
   // GAME MATCHMAKING HELPERS
   // ================================
@@ -2082,6 +2090,119 @@ export class AppGateway
 
     this.roomMusicState.set(roomId, existing);
     this.broadcastRoomMusicState(roomId);
+  }
+
+  // ================================
+  // MIC STATUS EVENTS
+  // ================================
+
+  @SubscribeMessage("micStatus")
+  async handleMicStatus(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { roomId: string; slotId: string; isActive: boolean },
+  ) {
+    if (!client.user) return;
+    const { roomId, slotId, isActive } = data || {};
+    if (!roomId || slotId === undefined) return;
+
+    const userId = client.user.id;
+    const slotIndex = parseInt(slotId, 10);
+    const slotKey = `room:${roomId}:mic_slots`;
+
+    try {
+      if (isActive) {
+        // User is taking the mic
+        const existingSlot = await this.redis.client.hget(slotKey, slotId);
+        let slotData: any = { userId: null, isLocked: false, isMuted: false };
+
+        if (existingSlot) {
+          slotData = JSON.parse(existingSlot);
+          if (slotData.userId && slotData.userId !== userId) {
+            client.emit("mic_error", { error: "المايك مشغول" });
+            return;
+          }
+          if (slotData.isLocked) {
+            client.emit("mic_error", { error: "المايك مقفل" });
+            return;
+          }
+        }
+
+        // Get user info
+        const user = await this.prisma.user.findUnique({
+          where: { id: userId },
+          select: { id: true, displayName: true, username: true, avatar: true, numericId: true },
+        });
+
+        slotData = {
+          ...slotData,
+          userId,
+          userName: user?.displayName || user?.username || userId,
+          userAvatar: user?.avatar,
+          userNumericId: user?.numericId?.toString(),
+          isSpeaking: true,
+          joinedAt: Date.now(),
+        };
+
+        await this.redis.client.hset(slotKey, slotId, JSON.stringify(slotData));
+        await this.redis.client.expire(slotKey, 86400);
+
+        // Broadcast to room
+        this.server.to(`room:${roomId}`).emit("mic_slot_updated", {
+          roomId,
+          slotIndex,
+          ...slotData,
+        });
+
+        this.logger.debug(`🎤 User ${userId} entered mic slot ${slotIndex} in room ${roomId}`);
+      } else {
+        // User is leaving the mic
+        const existingSlot = await this.redis.client.hget(slotKey, slotId);
+        if (existingSlot) {
+          const slotData = JSON.parse(existingSlot);
+          if (slotData.userId === userId) {
+            const emptySlot = {
+              userId: null,
+              userName: null,
+              userAvatar: null,
+              isLocked: slotData.isLocked || false,
+              isMuted: false,
+              isSpeaking: false,
+            };
+
+            await this.redis.client.hset(slotKey, slotId, JSON.stringify(emptySlot));
+
+            this.server.to(`room:${roomId}`).emit("mic_slot_updated", {
+              roomId,
+              slotIndex,
+              ...emptySlot,
+            });
+
+            this.logger.debug(`🎤 User ${userId} left mic slot ${slotIndex} in room ${roomId}`);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Mic status error: ${error.message}`);
+      client.emit("mic_error", { error: "حدث خطأ" });
+    }
+  }
+
+  @SubscribeMessage("mic_speaking")
+  async handleMicSpeaking(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { roomId: string; slotId: string; isSpeaking: boolean },
+  ) {
+    if (!client.user) return;
+    const { roomId, slotId, isSpeaking } = data || {};
+    if (!roomId || slotId === undefined) return;
+
+    // Broadcast speaking state to room (for speaking animation)
+    this.server.to(`room:${roomId}`).emit("mic_speaking_update", {
+      roomId,
+      slotIndex: parseInt(slotId, 10),
+      userId: client.user.id,
+      isSpeaking,
+    });
   }
 
   // ================================

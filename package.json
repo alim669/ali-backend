@@ -45,6 +45,7 @@
     "@nestjs/websockets": "^10.3.0",
     "@prisma/client": "^5.22.0",
     "@types/pg": "^8.16.0",
+    "agora-access-token": "^2.0.4",
     "argon2": "^0.31.2",
     "axios": "^1.13.2",
     "class-transformer": "^0.5.1",

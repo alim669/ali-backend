@@ -147,6 +147,7 @@ export class RoomsService {
           currentMembers: true,
           isPasswordProtected: true,
           ownerId: true, // 🔐 إضافة ownerId مباشرة
+          settings: true, // 👑 إعدادات الغرفة (isVip, vipExpiresAt, etc.)
           createdAt: true,
           owner: {
             select: {
@@ -179,8 +180,25 @@ export class RoomsService {
       })),
     );
 
+    // 👑 ترتيب الغرف: VIP أولاً (النشطة فقط) ثم الباقي
+    const now = new Date();
+    const sortedRooms = roomsWithOnline.sort((a, b) => {
+      const aSettings = a.settings as any || {};
+      const bSettings = b.settings as any || {};
+      
+      // تحقق من VIP نشط (isVip = true و vipExpiresAt لم تنتهي)
+      const aIsVip = aSettings.isVip && (!aSettings.vipExpiresAt || new Date(aSettings.vipExpiresAt) > now);
+      const bIsVip = bSettings.isVip && (!bSettings.vipExpiresAt || new Date(bSettings.vipExpiresAt) > now);
+      
+      if (aIsVip && !bIsVip) return -1;
+      if (!aIsVip && bIsVip) return 1;
+      
+      // ترتيب حسب الأعضاء للغرف من نفس النوع
+      return (b.currentMembers || 0) - (a.currentMembers || 0);
+    });
+
     return {
-      data: roomsWithOnline,
+      data: sortedRooms,
       meta: {
         total,
         page,
@@ -326,9 +344,16 @@ export class RoomsService {
       MemberRole.ADMIN,
     ]);
 
+    // 👑 دمج الإعدادات القديمة مع الجديدة
+    const currentSettings = (room.settings as any) || {};
+    const newSettings = dto.settings ? { ...currentSettings, ...dto.settings } : currentSettings;
+    
     const updated = await this.prisma.room.update({
       where: { id: roomId },
-      data: dto,
+      data: {
+        ...dto,
+        settings: newSettings,
+      },
       select: {
         id: true,
         numericId: true,
@@ -336,13 +361,14 @@ export class RoomsService {
         description: true,
         avatar: true,
         maxMembers: true,
+        settings: true, // 👑 إرجاع الإعدادات
       },
     });
 
     // Invalidate cache
     await this.cache.invalidateRoom(roomId);
 
-    this.logger.log(`User ${userId} updated room ${roomId}`);
+    this.logger.log(`User ${userId} updated room ${roomId}, settings: ${JSON.stringify(newSettings)}`);
 
     // Notify room members via WebSocket
     await this.gateway.notifyRoomUpdated(roomId, {
@@ -350,7 +376,7 @@ export class RoomsService {
       avatar: updated.avatar,
       name: updated.name,
       description: updated.description,
-      settings: dto.settings ?? {},
+      settings: newSettings,
       backgroundUrl: dto.settings?.backgroundUrl,
     }, userId);
 
@@ -768,5 +794,265 @@ export class RoomsService {
     }
 
     return room;
+  }
+
+  // ================================
+  // MIC SLOTS MANAGEMENT
+  // ================================
+
+  /**
+   * Get mic slots state for a room
+   */
+  async getMicSlots(roomId: string) {
+    const slots = await this.redis.client.hgetall(`room:${roomId}:mic_slots`);
+    const result: any[] = [];
+
+    // Default 8 slots
+    for (let i = 0; i < 8; i++) {
+      const slotData = slots[i.toString()];
+      if (slotData) {
+        try {
+          result.push({ index: i, ...JSON.parse(slotData) });
+        } catch {
+          result.push({ index: i, userId: null, isLocked: false, isMuted: false });
+        }
+      } else {
+        result.push({ index: i, userId: null, isLocked: false, isMuted: false });
+      }
+    }
+
+    return { slots: result };
+  }
+
+  /**
+   * Enter a mic slot
+   */
+  async enterMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      throw new NotFoundException("الغرفة غير موجودة");
+    }
+
+    // Check if slot is available
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+
+    if (existingSlot) {
+      const slotData = JSON.parse(existingSlot);
+      if (slotData.userId && slotData.userId !== userId) {
+        throw new ConflictException("المايك مشغول");
+      }
+      if (slotData.isLocked) {
+        throw new ForbiddenException("المايك مقفل");
+      }
+    }
+
+    // Get user info
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, displayName: true, username: true, avatar: true, numericId: true },
+    });
+
+    const slotData = {
+      userId,
+      userName: user?.displayName || user?.username || userId,
+      userAvatar: user?.avatar,
+      userNumericId: user?.numericId?.toString(),
+      isLocked: false,
+      isMuted: false,
+      isSpeaking: false,
+      joinedAt: Date.now(),
+    };
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+    await this.redis.client.expire(slotKey, 86400); // 24 hours
+
+    // Broadcast to room
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...slotData,
+    });
+
+    this.logger.log(`User ${userId} entered mic slot ${slotIndex} in room ${roomId}`);
+
+    return { success: true, slot: { index: slotIndex, ...slotData } };
+  }
+
+  /**
+   * Leave a mic slot
+   */
+  async leaveMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+
+    if (existingSlot) {
+      const slotData = JSON.parse(existingSlot);
+      // Only the user on the mic or owner can leave
+      if (slotData.userId && slotData.userId !== userId) {
+        // Check if user is owner
+        const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+        if (room?.ownerId !== userId) {
+          throw new ForbiddenException("لا يمكنك مغادرة هذا المايك");
+        }
+      }
+    }
+
+    // Clear the slot
+    const emptySlot = {
+      userId: null,
+      userName: null,
+      userAvatar: null,
+      isLocked: false,
+      isMuted: false,
+      isSpeaking: false,
+    };
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
+
+    // Broadcast to room
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...emptySlot,
+    });
+
+    this.logger.log(`User ${userId} left mic slot ${slotIndex} in room ${roomId}`);
+
+    return { success: true };
+  }
+
+  /**
+   * Lock a mic slot (owner only)
+   */
+  async lockMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room || room.ownerId !== userId) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    
+    const slotData = existingSlot ? JSON.parse(existingSlot) : {};
+    slotData.isLocked = true;
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...slotData,
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Unlock a mic slot (owner only)
+   */
+  async unlockMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room || room.ownerId !== userId) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    
+    const slotData = existingSlot ? JSON.parse(existingSlot) : {};
+    slotData.isLocked = false;
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...slotData,
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Mute a user on mic slot (owner only)
+   */
+  async muteMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room || room.ownerId !== userId) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    
+    if (!existingSlot) {
+      throw new NotFoundException("المايك فارغ");
+    }
+
+    const slotData = JSON.parse(existingSlot);
+    slotData.isMuted = !slotData.isMuted; // Toggle
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...slotData,
+    });
+
+    return { success: true, isMuted: slotData.isMuted };
+  }
+
+  /**
+   * Kick user from mic slot (owner only)
+   */
+  async kickFromMicSlot(roomId: string, slotIndex: number, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room || room.ownerId !== userId) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    
+    if (!existingSlot) {
+      throw new NotFoundException("المايك فارغ");
+    }
+
+    const slotData = JSON.parse(existingSlot);
+    const kickedUserId = slotData.userId;
+
+    // Clear the slot
+    const emptySlot = {
+      userId: null,
+      userName: null,
+      userAvatar: null,
+      isLocked: false,
+      isMuted: false,
+      isSpeaking: false,
+    };
+
+    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
+
+    // Broadcast to room
+    this.gateway.emitToRoom(roomId, "mic_slot_updated", {
+      roomId,
+      slotIndex,
+      ...emptySlot,
+    });
+
+    // Also notify the kicked user
+    if (kickedUserId) {
+      this.gateway.emitToRoom(roomId, "mic_kick", {
+        roomId,
+        slotIndex,
+        kickedUserId,
+      });
+    }
+
+    this.logger.log(`Owner ${userId} kicked user from mic slot ${slotIndex} in room ${roomId}`);
+
+    return { success: true };
   }
 }

@@ -424,7 +424,9 @@ export class RoomsService {
       }
 
       if (!existingMember.leftAt) {
-        throw new ConflictException("أنت عضو بالفعل في هذه الغرفة");
+        // المستخدم عضو بالفعل - نرجع نجاح بدلاً من خطأ
+        this.logger.log(`User ${userId} already a member of room ${roomId}`);
+        return { message: "أنت عضو بالفعل في هذه الغرفة", alreadyMember: true };
       }
 
       // Rejoin

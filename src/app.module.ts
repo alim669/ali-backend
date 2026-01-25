@@ -69,17 +69,17 @@ import { configuration, envValidationSchema } from "./config";
         {
           name: "short",
           ttl: 1000, // 1 second
-          limit: 10, // 10 requests per second
+          limit: 50, // 50 requests per second
         },
         {
           name: "medium",
           ttl: 60000, // 1 minute
-          limit: config.get<number>("THROTTLE_LIMIT", 100),
+          limit: config.get<number>("THROTTLE_LIMIT", 300),
         },
         {
           name: "long",
           ttl: 3600000, // 1 hour
-          limit: 1000,
+          limit: 5000,
         },
       ],
     }),

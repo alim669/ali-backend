@@ -9,6 +9,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
   Param,
   Query,
@@ -139,6 +140,17 @@ export class OwnerAgentsController {
   @HttpCode(HttpStatus.OK)
   async removeAgent(@Param("agentId") agentId: string) {
     this.logger.log(`Owner: Removing agent ${agentId}`);
+    return this.agentsService.removeAgent(agentId);
+  }
+
+  /**
+   * DELETE /api/v1/owner/agents/:agentId
+   * حذف وكيل (للتوافق مع التطبيق)
+   */
+  @Delete(":agentId")
+  @HttpCode(HttpStatus.OK)
+  async deleteAgent(@Param("agentId") agentId: string) {
+    this.logger.log(`Owner: Deleting agent ${agentId}`);
     return this.agentsService.removeAgent(agentId);
   }
 

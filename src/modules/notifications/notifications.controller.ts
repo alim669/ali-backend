@@ -71,6 +71,16 @@ export class NotificationsController {
     return { message: "تم تحديد كل الإشعارات كمقروءة" };
   }
 
+  @Delete("all")
+  @ApiOperation({ summary: "حذف كل الإشعارات" })
+  async deleteAllNotifications(@CurrentUser("id") userId: string) {
+    const result = await this.notificationsService.deleteAll(userId);
+    return { 
+      message: "تم حذف كل الإشعارات", 
+      deletedCount: result.count 
+    };
+  }
+
   @Delete(":id")
   @ApiOperation({ summary: "حذف إشعار" })
   async deleteNotification(

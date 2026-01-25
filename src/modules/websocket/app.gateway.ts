@@ -2124,7 +2124,9 @@ export class AppGateway
       };
     }
 
-    const { roomId, content, type = "TEXT", metadata, tempId } = data;
+    const { roomId, content, type: rawType = "TEXT", metadata, tempId } = data;
+    // Ensure type is uppercase to match Prisma enum
+    const type = rawType?.toUpperCase() || "TEXT";
     const clientMessageId =
       metadata?.clientMessageId || metadata?.tempId || tempId;
 
@@ -2296,7 +2298,7 @@ export class AppGateway
         createdAt: message.createdAt.toISOString(),
       };
     } catch (error) {
-      this.logger.error(`❌ [MESSAGE] Error sending message: ${error.message}`);
+      this.logger.error(`❌ [MESSAGE] Error sending message: ${error.message}`, error.stack);
       if (tempId) {
         client.emit("message_state", {
           tempId,
@@ -2307,7 +2309,8 @@ export class AppGateway
       return {
         success: false,
         error: "SEND_ERROR",
-        message: "فشل إرسال الرسالة",
+        message: `فشل إرسال الرسالة: ${error.message}`,
+        details: error.message,
       };
     }
   }
@@ -3354,23 +3357,26 @@ export class AppGateway
         const giftData = parsedMessage.data;
 
         if (giftData?.roomId) {
-          // Prepare gift event data
+          // Prepare gift event data with sender/receiver info
           const giftEventData = {
             id: giftData.giftSend?.id || this.generateEventId(),
             roomId: giftData.roomId,
             senderId: giftData.senderId,
-            senderName: giftData.giftSend?.senderName || "Unknown",
-            senderAvatar: giftData.giftSend?.senderAvatar,
+            senderName: giftData.senderName || giftData.giftSend?.senderName || "Unknown",
+            senderAvatar: giftData.senderAvatar || giftData.giftSend?.senderAvatar,
             receiverId: giftData.receiverId,
-            receiverName: giftData.giftSend?.receiverName || "Unknown",
+            receiverName: giftData.receiverName || giftData.giftSend?.receiverName || "Unknown",
+            receiverAvatar: giftData.receiverAvatar || giftData.giftSend?.receiverAvatar,
             giftId: giftData.gift?.id,
             giftName: giftData.gift?.name,
             giftImage: giftData.gift?.imageUrl,
             giftPrice: giftData.gift?.price,
-            quantity: giftData.giftSend?.quantity || 1,
-            totalValue: giftData.giftSend?.totalPrice || 0,
+            quantity: giftData.quantity || giftData.giftSend?.quantity || 1,
+            totalValue: giftData.totalPrice || giftData.giftSend?.totalPrice || 0,
             createdAt: new Date().toISOString(),
           };
+
+          this.logger.debug(`📡 Broadcasting gift to room:${giftData.roomId} - from ${giftEventData.senderName} to ${giftEventData.receiverName}`);
 
           // Broadcast using unified event system
           this.broadcastRoomEvent(giftData.roomId, {
@@ -3957,6 +3963,26 @@ export class AppGateway
           timestamp: new Date().toISOString(),
         });
 
+        // ✅ إنشاء إشعارات في قاعدة البيانات للطرفين
+        await this.prisma.notification.createMany({
+          data: [
+            {
+              userId: toUserId,
+              type: NotificationType.FRIEND_REQUEST_ACCEPTED,
+              title: "✅ أصبحتما أصدقاء",
+              body: `${client.user.displayName || client.user.username} قبل طلب صداقتك`,
+              data: { friendId: client.user.id },
+            },
+            {
+              userId: client.user.id,
+              type: NotificationType.FRIEND_REQUEST_ACCEPTED,
+              title: "✅ أصبحتما أصدقاء",
+              body: `${targetUser.displayName || targetUser.username} الآن صديقك`,
+              data: { friendId: toUserId },
+            },
+          ],
+        });
+
         return { success: true, message: "تم قبول طلب الصداقة تلقائياً - كان لديه طلب معلق لك", autoAccepted: true };
       }
 
@@ -3989,6 +4015,22 @@ export class AppGateway
         toUserId,
         ...requestData,
       }));
+
+      // ✅ إنشاء إشعار في قاعدة البيانات للمستخدم المستهدف
+      await this.prisma.notification.create({
+        data: {
+          userId: toUserId,
+          type: NotificationType.FRIEND_REQUEST_RECEIVED,
+          title: "📨 طلب صداقة جديد",
+          body: `${client.user.displayName || client.user.username} أرسل لك طلب صداقة`,
+          data: { 
+            requestId: requestId,
+            fromUserId: client.user.id, 
+            fromUserName: client.user.displayName || client.user.username,
+            fromUserAvatar: client.user.avatar,
+          },
+        },
+      });
 
       this.logger.log(`👥 Friend request sent: ${client.user.username} -> ${targetUser.username}`);
 
@@ -4070,10 +4112,10 @@ export class AppGateway
       await this.prisma.notification.create({
         data: {
           userId: req.from_user_id,
-          type: NotificationType.SYSTEM_MESSAGE,
+          type: NotificationType.FRIEND_REQUEST_ACCEPTED,
           title: "✅ تم قبول طلب الصداقة",
           body: `${client.user.displayName || client.user.username} قبل طلب صداقتك`,
-          data: { accepterId: client.user.id, notifType: "FRIEND_REQUEST_ACCEPTED" },
+          data: { accepterId: client.user.id },
         },
       });
 

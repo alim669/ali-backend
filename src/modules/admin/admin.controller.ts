@@ -344,7 +344,6 @@ export class AdminController {
       { email: { contains: query, mode: "insensitive" } },
       { username: { contains: query, mode: "insensitive" } },
       { displayName: { contains: query, mode: "insensitive" } },
-      { customId: { contains: query, mode: "insensitive" } },
     ];
 
     // Only add numericId search if query is a valid number
@@ -373,15 +372,29 @@ export class AdminController {
         avatar: true,
         role: true,
         status: true,
-        customId: true,
         numericId: true,
-        banReason: true,
-        bannedAt: true,
-        bannedUntil: true,
+        wallet: {
+          select: {
+            balance: true,
+          },
+        },
       },
       take: Number(limit),
-    });
+    }) as any;
 
-    return { data: users };
+    // Convert BigInt to string for JSON serialization
+    const serializedUsers = users.map((user: any) => ({
+      ...user,
+      numericId: user.numericId ? user.numericId.toString() : null,
+      wallet: user.wallet
+        ? {
+            balance: user.wallet.balance
+              ? user.wallet.balance.toString()
+              : "0",
+          }
+        : null,
+    }));
+
+    return { data: serializedUsers };
   }
 }

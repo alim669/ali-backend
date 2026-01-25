@@ -254,6 +254,69 @@ export class RoomsService {
   }
 
   // ================================
+  // GET ROOM BY NUMERIC ID
+  // ================================
+
+  async findByNumericId(numericId: number, userId?: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { numericId: numericId },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+        members: {
+          where: { leftAt: null, isBanned: false },
+          take: 50,
+          orderBy: { joinedAt: "asc" },
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!room) {
+      throw new NotFoundException("الغرفة غير موجودة");
+    }
+
+    // Check if user is member
+    let membership = null;
+    if (userId) {
+      membership = await this.prisma.roomMember.findUnique({
+        where: {
+          roomId_userId: { roomId: room.id, userId },
+        },
+      });
+    }
+
+    // Get online users
+    const onlineUsers = await this.redis.getRoomOnlineUsers(room.id);
+
+    this.logger.log(`📦 findByNumericId: room.id=${room.id}, numericId=${room.numericId}`);
+
+    return {
+      ...room,
+      passwordHash: undefined, // Never expose
+      onlineCount: onlineUsers.length,
+      onlineUsers,
+      isMember: !!membership,
+      memberRole: membership?.role,
+    };
+  }
+
+  // ================================
   // UPDATE ROOM
   // ================================
 

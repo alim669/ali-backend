@@ -170,6 +170,26 @@ export class FriendsService {
       // إرسال إشعار فوري عبر Redis
       if (senderInfo.rows.length > 0) {
         const sender = senderInfo.rows[0];
+        
+        // ✅ إنشاء إشعار في قاعدة البيانات للمستخدم المستهدف
+        await client.query(
+          `
+          INSERT INTO "Notification" ("id", "userId", "type", "title", "body", "data", "createdAt")
+          VALUES (gen_random_uuid(), $1, 'FRIEND_REQUEST_RECEIVED', '📨 طلب صداقة جديد', $2, $3, NOW())
+          `,
+          [
+            toUserId,
+            `${sender.displayName || sender.username} أرسل لك طلب صداقة`,
+            JSON.stringify({ 
+              requestId: result.rows[0].id,
+              fromUserId: fromUserId, 
+              fromUserName: sender.displayName || sender.username,
+              fromUserAvatar: sender.avatar,
+            }),
+          ],
+        );
+        console.log(`📝 Friend request notification created in DB for user ${toUserId}`);
+        
         await this.redis.publish('friend:request:new', JSON.stringify({
           requestId: result.rows[0].id,
           fromUserId: fromUserId,

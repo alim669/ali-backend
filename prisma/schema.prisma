@@ -351,6 +351,7 @@ model AgentRequest {
   region          String
   email           String
   phone           String
+  telegram        String?
   message         String?
   status          AgentRequestStatus @default(PENDING)
   reviewedBy      String?
@@ -375,6 +376,7 @@ model Agent {
   province  String
   region    String
   phone     String
+  telegram  String?
   status    AgentStatus @default(ACTIVE)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
@@ -520,6 +522,10 @@ enum NotificationType {
   COMMENT
   FRIEND_REQUEST_ACCEPTED
   FRIEND_REQUEST_RECEIVED
+  POINTS_RECEIVED
+  POINTS_DEDUCTED
+  TRANSFER_RECEIVED
+  TRANSFER_SENT
 }
 
 enum ReportType {

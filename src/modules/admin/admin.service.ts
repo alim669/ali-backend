@@ -204,11 +204,25 @@ export class AdminService {
     const where: Prisma.UserWhereInput = {};
 
     if (search) {
-      where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { username: { contains: search, mode: 'insensitive' } },
-        { displayName: { contains: search, mode: 'insensitive' } },
-      ];
+      // التحقق مما إذا كان البحث رقماً (للبحث بـ numericId)
+      const searchAsNumber = parseInt(search, 10);
+      const isNumericSearch = !isNaN(searchAsNumber) && searchAsNumber.toString() === search;
+      
+      if (isNumericSearch) {
+        // البحث بـ numericId أو بالنص العادي
+        where.OR = [
+          { numericId: BigInt(search) },
+          { email: { contains: search, mode: 'insensitive' } },
+          { username: { contains: search, mode: 'insensitive' } },
+          { displayName: { contains: search, mode: 'insensitive' } },
+        ];
+      } else {
+        where.OR = [
+          { email: { contains: search, mode: 'insensitive' } },
+          { username: { contains: search, mode: 'insensitive' } },
+          { displayName: { contains: search, mode: 'insensitive' } },
+        ];
+      }
     }
 
     if (status) {

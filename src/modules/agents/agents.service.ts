@@ -18,6 +18,7 @@ export interface CreateAgentRequestDto {
   region: string;
   email: string;
   phone: string;
+  telegram?: string;
   message?: string;
 }
 
@@ -69,6 +70,7 @@ export class AgentsService {
         region: dto.region,
         email: dto.email,
         phone: dto.phone,
+        telegram: dto.telegram,
         message: dto.message,
       },
     });
@@ -144,20 +146,38 @@ export class AgentsService {
     const agents = await this.prisma.agent.findMany({
       where: { status: "ACTIVE" },
       orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          select: {
+            id: true,
+            numericId: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+      },
     });
 
     return agents.map((agent) => ({
       id: agent.id,
       odoo_user_id: agent.userId,
-      username: agent.fullName,
+      userId: agent.userId,
+      numericId: agent.user?.numericId ? Number(agent.user.numericId) : null,
+      username: agent.user?.username || agent.fullName,
       display_name: agent.fullName,
+      displayName: agent.fullName,
       fullName: agent.fullName,
+      avatarUrl: agent.user?.avatar,
+      avatar_url: agent.user?.avatar,
       country: agent.country,
       province: agent.province,
       region: agent.region,
       phone: agent.phone,
+      telegram: (agent as any).telegram || null,
       status: "active",
       approved_at: agent.createdAt.toISOString(),
+      createdAt: agent.createdAt.toISOString(),
     }));
   }
 
@@ -351,6 +371,7 @@ export class AgentsService {
           province: request.province,
           region: request.region,
           phone: request.phone,
+          telegram: (request as any).telegram,
         },
       });
     }

@@ -14,7 +14,7 @@ import {
   TransactionQueryDto,
   TransferByCustomIdDto,
 } from "./dto/wallets.dto";
-import { TransactionType, TransactionStatus, Prisma } from "@prisma/client";
+import { TransactionType, TransactionStatus, Prisma, NotificationType } from "@prisma/client";
 
 @Injectable()
 export class WalletsService {
@@ -400,6 +400,24 @@ export class WalletsService {
           },
         });
 
+        // ✅ إنشاء إشعار للمستخدم عند تعديل رصيده
+        const isAddition = dto.amount > 0;
+        await tx.notification.create({
+          data: {
+            userId: targetUserId,
+            type: isAddition ? NotificationType.POINTS_RECEIVED : NotificationType.POINTS_DEDUCTED,
+            title: isAddition ? "💰 تم إضافة نقاط لرصيدك" : "💸 تم خصم نقاط من رصيدك",
+            body: isAddition 
+              ? `تم إضافة ${Math.abs(dto.amount)} نقطة إلى رصيدك. السبب: ${dto.reason}`
+              : `تم خصم ${Math.abs(dto.amount)} نقطة من رصيدك. السبب: ${dto.reason}`,
+            data: {
+              amount: dto.amount,
+              reason: dto.reason,
+              newBalance: this.toNumber(updatedWallet.balance),
+            },
+          },
+        });
+
         return updatedWallet;
       },
     );
@@ -526,9 +544,30 @@ export class WalletsService {
           } as any,
         });
 
-        return { senderWallet: updatedSenderWallet, recipientWallet: updatedRecipientWallet };
+        return { senderWallet: updatedSenderWallet, recipientWallet: updatedRecipientWallet, recipient };
       },
     );
+
+    // ✅ إنشاء إشعار للمستلم عند استلام تحويل
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { displayName: true, username: true },
+    });
+    
+    await this.prisma.notification.create({
+      data: {
+        userId: recipient.id,
+        type: NotificationType.TRANSFER_RECEIVED,
+        title: "💰 استلمت تحويل",
+        body: `${sender?.displayName || sender?.username || 'مستخدم'} أرسل لك ${dto.amount} نقطة`,
+        data: {
+          senderId: senderId,
+          senderName: sender?.displayName || sender?.username,
+          amount: dto.amount,
+          note: dto.note,
+        },
+      },
+    });
 
     this.logger.log(
       `Transfer: ${dto.amount} coins from ${senderId} to ${recipient.id} (numericId: ${dto.recipientCustomId})`,

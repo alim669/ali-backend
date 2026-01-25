@@ -228,10 +228,21 @@ export class GiftsService {
     // Validate receiver exists
     const receiver = await this.prisma.user.findUnique({
       where: { id: dto.receiverId },
+      select: { id: true, displayName: true, avatar: true },
     });
 
     if (!receiver) {
       throw new NotFoundException("المستلم غير موجود");
+    }
+
+    // Get sender info
+    const sender = await this.prisma.user.findUnique({
+      where: { id: senderId },
+      select: { id: true, displayName: true, avatar: true },
+    });
+
+    if (!sender) {
+      throw new NotFoundException("المرسل غير موجود");
     }
 
     // Cannot send to yourself
@@ -450,11 +461,23 @@ export class GiftsService {
     await this.redis.publish("gifts:sent", {
       type: "gift_sent",
       data: {
-        giftSend: result.giftSend,
+        giftSend: {
+          ...result.giftSend,
+          senderName: sender.displayName,
+          senderAvatar: sender.avatar,
+          receiverName: receiver.displayName,
+          receiverAvatar: receiver.avatar,
+        },
         gift: result.gift,
         senderId,
+        senderName: sender.displayName,
+        senderAvatar: sender.avatar,
         receiverId: dto.receiverId,
+        receiverName: receiver.displayName,
+        receiverAvatar: receiver.avatar,
         roomId: dto.roomId,
+        quantity: result.giftSend.quantity,
+        totalPrice: result.giftSend.totalPrice,
       },
     });
 

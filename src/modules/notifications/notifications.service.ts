@@ -25,10 +25,26 @@ export class NotificationsService {
   ) {}
 
   // ================================
+  // CONSTANTS
+  // ================================
+  
+  private readonly MAX_NOTIFICATIONS_PER_USER = 100;
+  private readonly PROTECTED_NOTIFICATION_TYPES: NotificationType[] = [
+    'POINTS_RECEIVED',
+    'TRANSFER_RECEIVED',
+    'TRANSFER_SENT',
+    'GIFT_RECEIVED',
+  ];
+  private readonly PROTECTED_DAYS = 30;
+
+  // ================================
   // CREATE NOTIFICATION
   // ================================
 
   async create(dto: CreateNotificationDto): Promise<any> {
+    // Check if user has reached notification limit
+    await this.enforceNotificationLimit(dto.userId);
+    
     const notification = await this.prisma.notification.create({
       data: {
         userId: dto.userId,
@@ -51,6 +67,66 @@ export class NotificationsService {
     this.logger.log(`Notification created for user ${dto.userId}: ${dto.type}`);
 
     return notification;
+  }
+
+  // ================================
+  // ENFORCE NOTIFICATION LIMIT (100 per user)
+  // ================================
+
+  private async enforceNotificationLimit(userId: string): Promise<void> {
+    const count = await this.prisma.notification.count({ where: { userId } });
+    
+    if (count >= this.MAX_NOTIFICATIONS_PER_USER) {
+      const toDelete = count - this.MAX_NOTIFICATIONS_PER_USER + 1;
+      
+      // Calculate protected date threshold
+      const protectedDate = new Date();
+      protectedDate.setDate(protectedDate.getDate() - this.PROTECTED_DAYS);
+      
+      // First try to delete oldest READ notifications (excluding protected types within 30 days)
+      const readToDelete = await this.prisma.notification.findMany({
+        where: {
+          userId,
+          isRead: true,
+          OR: [
+            { type: { notIn: this.PROTECTED_NOTIFICATION_TYPES } },
+            { createdAt: { lt: protectedDate } },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+        take: toDelete,
+        select: { id: true },
+      });
+      
+      if (readToDelete.length > 0) {
+        await this.prisma.notification.deleteMany({
+          where: { id: { in: readToDelete.map(n => n.id) } },
+        });
+        this.logger.log(`Deleted ${readToDelete.length} read notifications for user ${userId}`);
+        return;
+      }
+      
+      // If no read notifications, delete oldest unread (excluding protected)
+      const unreadToDelete = await this.prisma.notification.findMany({
+        where: {
+          userId,
+          OR: [
+            { type: { notIn: this.PROTECTED_NOTIFICATION_TYPES } },
+            { createdAt: { lt: protectedDate } },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+        take: toDelete,
+        select: { id: true },
+      });
+      
+      if (unreadToDelete.length > 0) {
+        await this.prisma.notification.deleteMany({
+          where: { id: { in: unreadToDelete.map(n => n.id) } },
+        });
+        this.logger.log(`Deleted ${unreadToDelete.length} oldest notifications for user ${userId}`);
+      }
+    }
   }
 
   // ================================
@@ -153,6 +229,18 @@ export class NotificationsService {
     return this.prisma.notification.deleteMany({
       where: { id: notificationId, userId },
     });
+  }
+
+  // ================================
+  // DELETE ALL NOTIFICATIONS (for user)
+  // ================================
+
+  async deleteAll(userId: string) {
+    const result = await this.prisma.notification.deleteMany({
+      where: { userId },
+    });
+    this.logger.log(`Deleted all ${result.count} notifications for user ${userId}`);
+    return result;
   }
 
   // ================================

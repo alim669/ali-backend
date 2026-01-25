@@ -66,9 +66,10 @@ export class AgentsController {
     const region = body.region;
     const email = body.email;
     const phone = body.phone;
+    const telegram = body.telegram;
     const message = body.message;
 
-    this.logger.log(`Agent request received: ${JSON.stringify({ fullName, country, province, region, email, phone })}`);
+    this.logger.log(`Agent request received: ${JSON.stringify({ fullName, country, province, region, email, phone, telegram })}`);
 
     // Validation - التحقق من الحقول المطلوبة
     if (!fullName || fullName.trim().length < 3) {
@@ -97,6 +98,7 @@ export class AgentsController {
       region: region.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
+      telegram: telegram?.trim() || undefined,
       message: message?.trim() || undefined,
     });
   }

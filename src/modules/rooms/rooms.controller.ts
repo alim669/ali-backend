@@ -53,6 +53,15 @@ export class RoomsController {
     return this.roomsService.getMyRooms(userId);
   }
 
+  @Get("by-numeric-id/:numericId")
+  @ApiOperation({ summary: "البحث عن غرفة بالرقم التعريفي" })
+  async findByNumericId(
+    @Param("numericId") numericId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.findByNumericId(parseInt(numericId, 10), userId);
+  }
+
   @Get(":id")
   @ApiOperation({ summary: "تفاصيل غرفة" })
   async findById(@Param("id") id: string, @CurrentUser("id") userId: string) {

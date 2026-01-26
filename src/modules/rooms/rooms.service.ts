@@ -807,17 +807,18 @@ export class RoomsService {
     const slots = await this.redis.client.hgetall(`room:${roomId}:mic_slots`);
     const result: any[] = [];
 
-    // Default 8 slots
+    // Default 8 slots - مقفلة افتراضياً
     for (let i = 0; i < 8; i++) {
       const slotData = slots[i.toString()];
       if (slotData) {
         try {
           result.push({ index: i, ...JSON.parse(slotData) });
         } catch {
-          result.push({ index: i, userId: null, isLocked: false, isMuted: false });
+          result.push({ index: i, userId: null, isLocked: true, isMuted: false });
         }
       } else {
-        result.push({ index: i, userId: null, isLocked: false, isMuted: false });
+        // ✅ المايكات مقفلة افتراضياً - المالك/المشرف يفتحونها
+        result.push({ index: i, userId: null, isLocked: true, isMuted: false });
       }
     }
 
@@ -852,15 +853,21 @@ export class RoomsService {
     const slotKey = `room:${roomId}:mic_slots`;
     const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
 
+    // ✅ المايكات مقفلة افتراضياً - فحص القفل حتى لو لم يكن هناك بيانات
+    let slotIsLocked = true; // مقفل افتراضياً
+    
     if (existingSlot) {
       const slotData = JSON.parse(existingSlot);
+      slotIsLocked = slotData.isLocked !== false; // مقفل إلا إذا كان false صراحةً
+      
       if (slotData.userId && slotData.userId !== userId) {
         throw new ConflictException("المايك مشغول");
       }
-      // المالك والمشرف يمكنهم تجاوز القفل
-      if (slotData.isLocked && !canBypassLock) {
-        throw new ForbiddenException("المايك مقفل - يرجى طلب الإذن من المالك");
-      }
+    }
+    
+    // المالك والمشرف يمكنهم تجاوز القفل
+    if (slotIsLocked && !canBypassLock) {
+      throw new ForbiddenException("المايك مقفل - يرجى طلب الإذن من المالك");
     }
 
     // Get user info

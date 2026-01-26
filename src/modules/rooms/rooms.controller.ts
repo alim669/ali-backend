@@ -132,6 +132,107 @@ export class RoomsController {
     return this.roomsService.kickMember(id, memberId, userId, dto);
   }
 
+  // ================================
+  // SIMPLIFIED KICK/BAN/LOCK ENDPOINTS
+  // ================================
+
+  @Post(":id/kick")
+  @ApiOperation({ summary: "طرد عضو (مبسط)" })
+  async kickMemberSimple(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.kickMember(id, targetUserId, userId, { ban: false });
+  }
+
+  @Post(":id/ban")
+  @ApiOperation({ summary: "حظر عضو" })
+  async banMember(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @Body("duration") duration: number | undefined,
+    @CurrentUser("id") userId: string,
+  ) {
+    const bannedUntil = duration 
+      ? new Date(Date.now() + duration * 60 * 1000) // duration in minutes
+      : undefined;
+    return this.roomsService.kickMember(id, targetUserId, userId, { 
+      ban: true, 
+      bannedUntil 
+    });
+  }
+
+  @Post(":id/unban")
+  @ApiOperation({ summary: "إلغاء حظر عضو" })
+  async unbanMember(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.unbanMember(id, targetUserId, userId);
+  }
+
+  @Post(":id/mute")
+  @ApiOperation({ summary: "كتم عضو" })
+  async muteMember(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @Body("duration") duration: number | undefined,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.muteMember(id, targetUserId, userId, duration);
+  }
+
+  @Post(":id/unmute")
+  @ApiOperation({ summary: "إلغاء كتم عضو" })
+  async unmuteMember(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.unmuteMember(id, targetUserId, userId);
+  }
+
+  @Post(":id/lock")
+  @ApiOperation({ summary: "قفل الغرفة (المالك فقط)" })
+  async lockRoom(
+    @Param("id") id: string,
+    @Body("password") password: string | undefined,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.lockRoom(id, userId, password);
+  }
+
+  @Post(":id/unlock")
+  @ApiOperation({ summary: "فتح الغرفة (المالك فقط)" })
+  async unlockRoom(
+    @Param("id") id: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.unlockRoom(id, userId);
+  }
+
+  @Post(":id/promote")
+  @ApiOperation({ summary: "تصعيد عضو لمشرف" })
+  async promoteToAdmin(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.updateMember(id, targetUserId, userId, { role: 'ADMIN' as any });
+  }
+
+  @Post(":id/demote")
+  @ApiOperation({ summary: "إنزال مشرف لعضو عادي" })
+  async demoteToMember(
+    @Param("id") id: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.updateMember(id, targetUserId, userId, { role: 'MEMBER' as any });
+  }
+
   @Post(":id/transfer/:newOwnerId")
   @ApiOperation({ summary: "نقل ملكية الغرفة" })
   async transferOwnership(

@@ -1055,4 +1055,176 @@ export class RoomsService {
 
     return { success: true };
   }
+
+  // ================================
+  // UNBAN MEMBER
+  // ================================
+
+  async unbanMember(roomId: string, targetId: string, userId: string) {
+    await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+    ]);
+
+    const targetMembership = await this.prisma.roomMember.findFirst({
+      where: { roomId, userId: targetId, isBanned: true },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException("العضو غير محظور");
+    }
+
+    await this.prisma.roomMember.update({
+      where: { id: targetMembership.id },
+      data: {
+        isBanned: false,
+        bannedUntil: null,
+        leftAt: null,
+      },
+    });
+
+    this.logger.log(`User ${userId} unbanned ${targetId} from room ${roomId}`);
+    return { message: "تم إلغاء حظر العضو بنجاح" };
+  }
+
+  // ================================
+  // MUTE/UNMUTE MEMBER
+  // ================================
+
+  async muteMember(roomId: string, targetId: string, userId: string, durationMinutes?: number) {
+    await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+      MemberRole.MODERATOR,
+    ]);
+
+    const targetMembership = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId, userId: targetId } },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException("العضو غير موجود");
+    }
+
+    const mutedUntil = durationMinutes 
+      ? new Date(Date.now() + durationMinutes * 60 * 1000)
+      : undefined;
+
+    await this.prisma.roomMember.update({
+      where: { id: targetMembership.id },
+      data: {
+        isMuted: true,
+        mutedUntil,
+      },
+    });
+
+    // Notify via websocket
+    this.gateway.emitToRoom(roomId, "member_muted", {
+      roomId,
+      userId: targetId,
+      mutedUntil,
+    });
+
+    this.logger.log(`User ${userId} muted ${targetId} in room ${roomId}`);
+    return { message: "تم كتم العضو بنجاح" };
+  }
+
+  async unmuteMember(roomId: string, targetId: string, userId: string) {
+    await this.getRoomWithPermission(roomId, userId, [
+      MemberRole.OWNER,
+      MemberRole.ADMIN,
+      MemberRole.MODERATOR,
+    ]);
+
+    const targetMembership = await this.prisma.roomMember.findUnique({
+      where: { roomId_userId: { roomId, userId: targetId } },
+    });
+
+    if (!targetMembership) {
+      throw new NotFoundException("العضو غير موجود");
+    }
+
+    await this.prisma.roomMember.update({
+      where: { id: targetMembership.id },
+      data: {
+        isMuted: false,
+        mutedUntil: null,
+      },
+    });
+
+    // Notify via websocket
+    this.gateway.emitToRoom(roomId, "member_unmuted", {
+      roomId,
+      userId: targetId,
+    });
+
+    this.logger.log(`User ${userId} unmuted ${targetId} in room ${roomId}`);
+    return { message: "تم إلغاء كتم العضو بنجاح" };
+  }
+
+  // ================================
+  // LOCK/UNLOCK ROOM
+  // ================================
+
+  async lockRoom(roomId: string, userId: string, password?: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      throw new NotFoundException("الغرفة غير موجودة");
+    }
+    if (room.ownerId !== userId) {
+      throw new ForbiddenException("فقط المالك يمكنه قفل الغرفة");
+    }
+
+    // Hash password if provided
+    let passwordHash: string | null = null;
+    if (password) {
+      const bcrypt = await import("bcrypt");
+      passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    await this.prisma.room.update({
+      where: { id: roomId },
+      data: {
+        isPasswordProtected: true,
+        passwordHash,
+        status: "ACTIVE", // Keep it active but locked
+      },
+    });
+
+    // Notify via websocket
+    this.gateway.emitToRoom(roomId, "room_locked", {
+      roomId,
+      isLocked: true,
+    });
+
+    this.logger.log(`Owner ${userId} locked room ${roomId}`);
+    return { message: "تم قفل الغرفة بنجاح", isLocked: true };
+  }
+
+  async unlockRoom(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      throw new NotFoundException("الغرفة غير موجودة");
+    }
+    if (room.ownerId !== userId) {
+      throw new ForbiddenException("فقط المالك يمكنه فتح الغرفة");
+    }
+
+    await this.prisma.room.update({
+      where: { id: roomId },
+      data: {
+        isPasswordProtected: false,
+        passwordHash: null,
+      },
+    });
+
+    // Notify via websocket
+    this.gateway.emitToRoom(roomId, "room_unlocked", {
+      roomId,
+      isLocked: false,
+    });
+
+    this.logger.log(`Owner ${userId} unlocked room ${roomId}`);
+    return { message: "تم فتح الغرفة بنجاح", isLocked: false };
+  }
 }

@@ -304,12 +304,41 @@ export class RoomsController {
   }
 
   @Post(":id/mic-slots/:slotIndex/kick")
-  @ApiOperation({ summary: "طرد مستخدم من المايك (للمالك فقط)" })
+  @ApiOperation({ summary: "طرد مستخدم من المايك (للمالك والمشرف)" })
   async kickFromMicSlot(
     @Param("id") id: string,
     @Param("slotIndex") slotIndex: string,
     @CurrentUser("id") userId: string,
   ) {
     return this.roomsService.kickFromMicSlot(id, parseInt(slotIndex, 10), userId);
+  }
+
+  @Post(":id/mic-slots/:slotIndex/invite")
+  @ApiOperation({ summary: "دعوة مستخدم للمايك (المالك/المشرف)" })
+  async inviteToMicSlot(
+    @Param("id") id: string,
+    @Param("slotIndex") slotIndex: string,
+    @Body("userId") targetUserId: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.inviteToMicSlot(id, parseInt(slotIndex, 10), targetUserId, userId);
+  }
+
+  @Post(":id/mic-slots/lock-all")
+  @ApiOperation({ summary: "قفل كل المايكات (المالك/المشرف)" })
+  async lockAllMicSlots(
+    @Param("id") id: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.lockAllMicSlots(id, userId);
+  }
+
+  @Post(":id/mic-slots/unlock-all")
+  @ApiOperation({ summary: "فتح كل المايكات (المالك/المشرف)" })
+  async unlockAllMicSlots(
+    @Param("id") id: string,
+    @CurrentUser("id") userId: string,
+  ) {
+    return this.roomsService.unlockAllMicSlots(id, userId);
   }
 }

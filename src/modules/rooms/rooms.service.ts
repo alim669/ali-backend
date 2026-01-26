@@ -826,12 +826,27 @@ export class RoomsService {
 
   /**
    * Enter a mic slot
+   * المايكات مقفلة افتراضياً - المالك والمشرف يمكنهم فتحها أو دعوة أحد
    */
   async enterMicSlot(roomId: string, slotIndex: number, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
     if (!room) {
       throw new NotFoundException("الغرفة غير موجودة");
     }
+
+    // Check user role
+    const isOwner = room.ownerId === userId;
+    const memberRole = room.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    const canBypassLock = isOwner || isAdmin;
 
     // Check if slot is available
     const slotKey = `room:${roomId}:mic_slots`;
@@ -842,8 +857,9 @@ export class RoomsService {
       if (slotData.userId && slotData.userId !== userId) {
         throw new ConflictException("المايك مشغول");
       }
-      if (slotData.isLocked) {
-        throw new ForbiddenException("المايك مقفل");
+      // المالك والمشرف يمكنهم تجاوز القفل
+      if (slotData.isLocked && !canBypassLock) {
+        throw new ForbiddenException("المايك مقفل - يرجى طلب الإذن من المالك");
       }
     }
 
@@ -858,7 +874,7 @@ export class RoomsService {
       userName: user?.displayName || user?.username || userId,
       userAvatar: user?.avatar,
       userNumericId: user?.numericId?.toString(),
-      isLocked: false,
+      isLocked: false, // فتح القفل عند الدخول
       isMuted: false,
       isSpeaking: false,
       joinedAt: Date.now(),
@@ -867,11 +883,12 @@ export class RoomsService {
     await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
     await this.redis.client.expire(slotKey, 86400); // 24 hours
 
-    // Broadcast to room
+    // Broadcast to room with animation event
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
       slotIndex,
       ...slotData,
+      animation: "join", // للأنيميشن في الـ Frontend
     });
 
     this.logger.log(`User ${userId} entered mic slot ${slotIndex} in room ${roomId}`);
@@ -881,40 +898,58 @@ export class RoomsService {
 
   /**
    * Leave a mic slot
+   * المغادرة سلسة مع إعادة القفل تلقائياً
    */
   async leaveMicSlot(roomId: string, slotIndex: number, userId: string) {
     const slotKey = `room:${roomId}:mic_slots`;
     const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    let leavingUserName: string | null = null;
 
     if (existingSlot) {
       const slotData = JSON.parse(existingSlot);
-      // Only the user on the mic or owner can leave
+      leavingUserName = slotData.userName;
+      
+      // Only the user on the mic or owner/admin can kick
       if (slotData.userId && slotData.userId !== userId) {
-        // Check if user is owner
-        const room = await this.prisma.room.findUnique({ where: { id: roomId } });
-        if (room?.ownerId !== userId) {
-          throw new ForbiddenException("لا يمكنك مغادرة هذا المايك");
+        // Check if user is owner or admin
+        const room = await this.prisma.room.findUnique({ 
+          where: { id: roomId },
+          include: {
+            members: {
+              where: { userId, leftAt: null },
+              select: { role: true }
+            }
+          }
+        });
+        const isOwner = room?.ownerId === userId;
+        const memberRole = room?.members[0]?.role;
+        const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+        
+        if (!isOwner && !isAdmin) {
+          throw new ForbiddenException("لا يمكنك إنزال هذا المستخدم");
         }
       }
     }
 
-    // Clear the slot
+    // Clear the slot - إعادة القفل تلقائياً بعد المغادرة
     const emptySlot = {
       userId: null,
       userName: null,
       userAvatar: null,
-      isLocked: false,
+      isLocked: true, // ✅ المايك يقفل تلقائياً بعد المغادرة
       isMuted: false,
       isSpeaking: false,
     };
 
     await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
 
-    // Broadcast to room
+    // Broadcast to room with animation
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
       slotIndex,
       ...emptySlot,
+      animation: "leave", // للأنيميشن في الـ Frontend
+      leavingUser: leavingUserName,
     });
 
     this.logger.log(`User ${userId} left mic slot ${slotIndex} in room ${roomId}`);
@@ -923,18 +958,32 @@ export class RoomsService {
   }
 
   /**
-   * Lock a mic slot (owner only)
+   * Lock a mic slot (owner or admin)
+   * قفل المايك - المالك والمشرف فقط
    */
   async lockMicSlot(roomId: string, slotIndex: number, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
-    if (!room || room.ownerId !== userId) {
-      throw new ForbiddenException("ليس لديك الصلاحية");
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية لقفل المايك");
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
     const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
     
-    const slotData = existingSlot ? JSON.parse(existingSlot) : {};
+    const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
     slotData.isLocked = true;
 
     await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
@@ -943,24 +992,39 @@ export class RoomsService {
       roomId,
       slotIndex,
       ...slotData,
+      animation: "lock",
     });
 
-    return { success: true };
+    return { success: true, message: "تم قفل المايك" };
   }
 
   /**
-   * Unlock a mic slot (owner only)
+   * Unlock a mic slot (owner or admin)
+   * فتح المايك - المالك والمشرف فقط
    */
   async unlockMicSlot(roomId: string, slotIndex: number, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
-    if (!room || room.ownerId !== userId) {
-      throw new ForbiddenException("ليس لديك الصلاحية");
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية لفتح المايك");
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
     const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
     
-    const slotData = existingSlot ? JSON.parse(existingSlot) : {};
+    const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
     slotData.isLocked = false;
 
     await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
@@ -969,18 +1033,33 @@ export class RoomsService {
       roomId,
       slotIndex,
       ...slotData,
+      animation: "unlock",
     });
 
-    return { success: true };
+    return { success: true, message: "تم فتح المايك" };
   }
 
   /**
-   * Mute a user on mic slot (owner only)
+   * Mute a user on mic slot (owner or admin)
+   * كتم المستخدم على المايك - المالك والمشرف
    */
   async muteMicSlot(roomId: string, slotIndex: number, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
-    if (!room || room.ownerId !== userId) {
-      throw new ForbiddenException("ليس لديك الصلاحية");
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية لكتم المايك");
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
@@ -999,18 +1078,33 @@ export class RoomsService {
       roomId,
       slotIndex,
       ...slotData,
+      animation: slotData.isMuted ? "mute" : "unmute",
     });
 
     return { success: true, isMuted: slotData.isMuted };
   }
 
   /**
-   * Kick user from mic slot (owner only)
+   * Kick user from mic slot (owner or admin)
+   * إنزال المستخدم من المايك - المالك والمشرف
    */
   async kickFromMicSlot(roomId: string, slotIndex: number, userId: string) {
-    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
-    if (!room || room.ownerId !== userId) {
-      throw new ForbiddenException("ليس لديك الصلاحية");
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية لإنزال المستخدم");
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
@@ -1022,24 +1116,27 @@ export class RoomsService {
 
     const slotData = JSON.parse(existingSlot);
     const kickedUserId = slotData.userId;
+    const kickedUserName = slotData.userName;
 
-    // Clear the slot
+    // Clear the slot - إعادة القفل تلقائياً
     const emptySlot = {
       userId: null,
       userName: null,
       userAvatar: null,
-      isLocked: false,
+      isLocked: true, // ✅ المايك يقفل تلقائياً بعد الإنزال
       isMuted: false,
       isSpeaking: false,
     };
 
     await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
 
-    // Broadcast to room
+    // Broadcast to room with animation
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
       slotIndex,
       ...emptySlot,
+      animation: "kick",
+      kickedUserName,
     });
 
     // Also notify the kicked user
@@ -1048,12 +1145,156 @@ export class RoomsService {
         roomId,
         slotIndex,
         kickedUserId,
+        kickedUserName,
       });
     }
 
-    this.logger.log(`Owner ${userId} kicked user from mic slot ${slotIndex} in room ${roomId}`);
+    this.logger.log(`Admin ${userId} kicked user from mic slot ${slotIndex} in room ${roomId}`);
 
     return { success: true };
+  }
+
+  /**
+   * Invite a user to a mic slot (owner or admin)
+   * دعوة مستخدم للصعود على المايك
+   */
+  async inviteToMicSlot(roomId: string, slotIndex: number, targetUserId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية لدعوة المستخدمين");
+    }
+
+    // Check if slot is available
+    const slotKey = `room:${roomId}:mic_slots`;
+    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    
+    if (existingSlot) {
+      const slotData = JSON.parse(existingSlot);
+      if (slotData.userId) {
+        throw new ConflictException("المايك مشغول بالفعل");
+      }
+    }
+
+    // Get target user info
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, displayName: true, username: true },
+    });
+
+    if (!targetUser) {
+      throw new NotFoundException("المستخدم غير موجود");
+    }
+
+    // Send invitation via WebSocket
+    this.gateway.emitToRoom(roomId, "mic_invite", {
+      roomId,
+      slotIndex,
+      invitedUserId: targetUserId,
+      invitedUserName: targetUser.displayName || targetUser.username,
+      invitedBy: userId,
+    });
+
+    this.logger.log(`User ${userId} invited ${targetUserId} to mic slot ${slotIndex}`);
+
+    return { 
+      success: true, 
+      message: `تم إرسال دعوة للصعود إلى ${targetUser.displayName || targetUser.username}` 
+    };
+  }
+
+  /**
+   * Lock all mic slots (owner or admin)
+   * قفل كل المايكات
+   */
+  async lockAllMicSlots(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+
+    // Lock all 8 slots
+    for (let i = 0; i < 8; i++) {
+      const existingSlot = await this.redis.client.hget(slotKey, i.toString());
+      const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
+      
+      // Only lock empty slots
+      if (!slotData.userId) {
+        slotData.isLocked = true;
+        await this.redis.client.hset(slotKey, i.toString(), JSON.stringify(slotData));
+      }
+    }
+
+    // Broadcast update
+    this.gateway.emitToRoom(roomId, "mic_slots_locked", { roomId });
+
+    return { success: true, message: "تم قفل كل المايكات الفارغة" };
+  }
+
+  /**
+   * Unlock all mic slots (owner or admin)
+   * فتح كل المايكات
+   */
+  async unlockAllMicSlots(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({ 
+      where: { id: roomId },
+      include: {
+        members: {
+          where: { userId, leftAt: null },
+          select: { role: true }
+        }
+      }
+    });
+    
+    const isOwner = room?.ownerId === userId;
+    const memberRole = room?.members[0]?.role;
+    const isAdmin = memberRole === 'ADMIN' || memberRole === 'OWNER';
+    
+    if (!isOwner && !isAdmin) {
+      throw new ForbiddenException("ليس لديك الصلاحية");
+    }
+
+    const slotKey = `room:${roomId}:mic_slots`;
+
+    // Unlock all 8 slots
+    for (let i = 0; i < 8; i++) {
+      const existingSlot = await this.redis.client.hget(slotKey, i.toString());
+      const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
+      slotData.isLocked = false;
+      await this.redis.client.hset(slotKey, i.toString(), JSON.stringify(slotData));
+    }
+
+    // Broadcast update
+    this.gateway.emitToRoom(roomId, "mic_slots_unlocked", { roomId });
+
+    return { success: true, message: "تم فتح كل المايكات" };
   }
 
   // ================================

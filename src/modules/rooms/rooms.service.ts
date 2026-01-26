@@ -804,7 +804,7 @@ export class RoomsService {
    * Get mic slots state for a room
    */
   async getMicSlots(roomId: string) {
-    const slots = await this.redis.client.hgetall(`room:${roomId}:mic_slots`);
+    const slots = await this.redis.hgetall(`room:${roomId}:mic_slots`);
     const result: any[] = [];
 
     // Default 8 slots - مقفلة افتراضياً
@@ -851,7 +851,7 @@ export class RoomsService {
 
     // Check if slot is available
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
 
     // ✅ المايكات مقفلة افتراضياً - فحص القفل حتى لو لم يكن هناك بيانات
     let slotIsLocked = true; // مقفل افتراضياً
@@ -887,8 +887,8 @@ export class RoomsService {
       joinedAt: Date.now(),
     };
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
-    await this.redis.client.expire(slotKey, 86400); // 24 hours
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+    await this.redis.expire(slotKey, 86400); // 24 hours
 
     // Broadcast to room with animation event
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
@@ -909,7 +909,7 @@ export class RoomsService {
    */
   async leaveMicSlot(roomId: string, slotIndex: number, userId: string) {
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     let leavingUserName: string | null = null;
 
     if (existingSlot) {
@@ -948,7 +948,7 @@ export class RoomsService {
       isSpeaking: false,
     };
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
 
     // Broadcast to room with animation
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
@@ -988,12 +988,12 @@ export class RoomsService {
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     
     const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
     slotData.isLocked = true;
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
 
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
@@ -1029,12 +1029,12 @@ export class RoomsService {
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     
     const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
     slotData.isLocked = false;
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
 
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
@@ -1070,7 +1070,7 @@ export class RoomsService {
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     
     if (!existingSlot) {
       throw new NotFoundException("المايك فارغ");
@@ -1079,7 +1079,7 @@ export class RoomsService {
     const slotData = JSON.parse(existingSlot);
     slotData.isMuted = !slotData.isMuted; // Toggle
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(slotData));
 
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
       roomId,
@@ -1115,7 +1115,7 @@ export class RoomsService {
     }
 
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     
     if (!existingSlot) {
       throw new NotFoundException("المايك فارغ");
@@ -1135,7 +1135,7 @@ export class RoomsService {
       isSpeaking: false,
     };
 
-    await this.redis.client.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
+    await this.redis.hset(slotKey, slotIndex.toString(), JSON.stringify(emptySlot));
 
     // Broadcast to room with animation
     this.gateway.emitToRoom(roomId, "mic_slot_updated", {
@@ -1186,7 +1186,7 @@ export class RoomsService {
 
     // Check if slot is available
     const slotKey = `room:${roomId}:mic_slots`;
-    const existingSlot = await this.redis.client.hget(slotKey, slotIndex.toString());
+    const existingSlot = await this.redis.hget(slotKey, slotIndex.toString());
     
     if (existingSlot) {
       const slotData = JSON.parse(existingSlot);
@@ -1249,13 +1249,13 @@ export class RoomsService {
 
     // Lock all 8 slots
     for (let i = 0; i < 8; i++) {
-      const existingSlot = await this.redis.client.hget(slotKey, i.toString());
+      const existingSlot = await this.redis.hget(slotKey, i.toString());
       const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
       
       // Only lock empty slots
       if (!slotData.userId) {
         slotData.isLocked = true;
-        await this.redis.client.hset(slotKey, i.toString(), JSON.stringify(slotData));
+        await this.redis.hset(slotKey, i.toString(), JSON.stringify(slotData));
       }
     }
 
@@ -1292,10 +1292,10 @@ export class RoomsService {
 
     // Unlock all 8 slots
     for (let i = 0; i < 8; i++) {
-      const existingSlot = await this.redis.client.hget(slotKey, i.toString());
+      const existingSlot = await this.redis.hget(slotKey, i.toString());
       const slotData = existingSlot ? JSON.parse(existingSlot) : { userId: null };
       slotData.isLocked = false;
-      await this.redis.client.hset(slotKey, i.toString(), JSON.stringify(slotData));
+      await this.redis.hset(slotKey, i.toString(), JSON.stringify(slotData));
     }
 
     // Broadcast update
@@ -1426,8 +1426,7 @@ export class RoomsService {
     // Hash password if provided
     let passwordHash: string | null = null;
     if (password) {
-      const bcrypt = await import("bcrypt");
-      passwordHash = await bcrypt.hash(password, 10);
+      passwordHash = await argon2.hash(password);
     }
 
     await this.prisma.room.update({

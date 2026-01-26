@@ -16,7 +16,6 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
-import { OptionalJwtAuthGuard } from "../auth/guards/optional-jwt-auth.guard";
 import { RolesGuard } from "../auth/guards/roles.guard";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -253,7 +252,7 @@ export class AppealsController {
     await this.prisma.notification.create({
       data: {
         userId: appeal.userId,
-        type: "SYSTEM",
+        type: "SYSTEM_MESSAGE",
         title: dto.status === "APPROVED" ? "تمت الموافقة على طعنك ✅" : "تم رفض طعنك ❌",
         body: dto.response,
         data: {

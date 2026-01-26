@@ -2112,7 +2112,7 @@ export class AppGateway
     try {
       if (isActive) {
         // User is taking the mic
-        const existingSlot = await this.redis.client.hget(slotKey, slotId);
+        const existingSlot = await this.redis.hget(slotKey, slotId);
         let slotData: any = { userId: null, isLocked: false, isMuted: false };
 
         if (existingSlot) {
@@ -2143,8 +2143,8 @@ export class AppGateway
           joinedAt: Date.now(),
         };
 
-        await this.redis.client.hset(slotKey, slotId, JSON.stringify(slotData));
-        await this.redis.client.expire(slotKey, 86400);
+        await this.redis.hset(slotKey, slotId, JSON.stringify(slotData));
+        await this.redis.expire(slotKey, 86400);
 
         // Broadcast to room
         this.server.to(`room:${roomId}`).emit("mic_slot_updated", {
@@ -2156,7 +2156,7 @@ export class AppGateway
         this.logger.debug(`🎤 User ${userId} entered mic slot ${slotIndex} in room ${roomId}`);
       } else {
         // User is leaving the mic
-        const existingSlot = await this.redis.client.hget(slotKey, slotId);
+        const existingSlot = await this.redis.hget(slotKey, slotId);
         if (existingSlot) {
           const slotData = JSON.parse(existingSlot);
           if (slotData.userId === userId) {
@@ -2169,7 +2169,7 @@ export class AppGateway
               isSpeaking: false,
             };
 
-            await this.redis.client.hset(slotKey, slotId, JSON.stringify(emptySlot));
+            await this.redis.hset(slotKey, slotId, JSON.stringify(emptySlot));
 
             this.server.to(`room:${roomId}`).emit("mic_slot_updated", {
               roomId,

@@ -259,6 +259,36 @@ export class RoomsService {
     // Get online users
     const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
 
+    // Get banned users
+    const bannedMembers = await this.prisma.roomMember.findMany({
+      where: { roomId, isBanned: true },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
+    // Get muted users
+    const mutedMembers = await this.prisma.roomMember.findMany({
+      where: { roomId, isMuted: true, leftAt: null },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+      },
+    });
+
     this.logger.log(`📦 findById: room.id=${room.id}, numericId=${room.numericId}`);
 
     return {
@@ -268,6 +298,17 @@ export class RoomsService {
       onlineUsers,
       isMember: !!membership,
       memberRole: membership?.role,
+      bannedUsers: bannedMembers.map(m => ({
+        odId: m.user.id,
+        odName: m.user.displayName || m.user.username,
+        odAvatar: m.user.avatar,
+      })),
+      mutedUsers: mutedMembers.map(m => ({
+        odId: m.user.id,
+        odName: m.user.displayName || m.user.username,
+        odAvatar: m.user.avatar,
+        mutedUntil: m.mutedUntil,
+      })),
     };
   }
 
@@ -585,9 +626,30 @@ export class RoomsService {
     // Remove from online
     await this.redis.removeUserFromRoom(roomId, targetId);
 
+    // 🔔 إرسال إشعار WebSocket للمستخدم المطرود وللغرفة
+    const eventName = dto?.ban ? "member_banned" : "member_kicked";
+    this.gateway.emitToRoom(roomId, eventName, {
+      roomId,
+      userId: targetId,
+      kickedBy: userId,
+      isBanned: dto?.ban || false,
+      bannedUntil: dto?.bannedUntil,
+    });
+
+    // إرسال إشعار مباشر للمستخدم المطرود
+    this.gateway.emitToUser(targetId, "you_were_kicked", {
+      roomId,
+      isBanned: dto?.ban || false,
+      message: dto?.ban ? "تم حظرك من هذه الغرفة" : "تم طردك من هذه الغرفة",
+    });
+
     this.logger.log(`User ${userId} kicked ${targetId} from room ${roomId}`);
 
-    return { message: dto?.ban ? "تم طرد وحظر العضو" : "تم طرد العضو" };
+    return { 
+      success: true,
+      message: dto?.ban ? "تم طرد وحظر العضو" : "تم طرد العضو",
+      targetId,
+    };
   }
 
   // ================================
@@ -620,13 +682,47 @@ export class RoomsService {
     const updated = await this.prisma.roomMember.update({
       where: { id: targetMembership.id },
       data: dto,
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatar: true,
+          },
+        },
+      },
     });
 
+    // 🔔 إرسال إشعار WebSocket للترقية/التنزيل
+    if (dto.role) {
+      const eventName = dto.role === 'ADMIN' ? "member_promoted" : "member_demoted";
+      this.gateway.emitToRoom(roomId, eventName, {
+        roomId,
+        userId: targetId,
+        newRole: dto.role,
+        promotedBy: userId,
+        userName: updated.user?.displayName || updated.user?.username,
+        userAvatar: updated.user?.avatar,
+      });
+
+      // إشعار المستخدم نفسه
+      this.gateway.emitToUser(targetId, "your_role_changed", {
+        roomId,
+        newRole: dto.role,
+        message: dto.role === 'ADMIN' ? "تم تعيينك كمشرف 👑" : "تم إزالتك من المشرفين",
+      });
+    }
+
     this.logger.log(
-      `User ${userId} updated member ${targetId} in room ${roomId}`,
+      `User ${userId} updated member ${targetId} in room ${roomId} to ${dto.role}`,
     );
 
-    return updated;
+    return {
+      success: true,
+      ...updated,
+      message: dto.role === 'ADMIN' ? "تم تعيين المشرف بنجاح" : "تم تحديث العضو",
+    };
   }
 
   // ================================
@@ -671,22 +767,13 @@ export class RoomsService {
         where: { roomId, leftAt: null, isBanned: false },
         include: {
           user: {
-            select: {
-              id: true,
-              username: true,
-              displayName: true,
-              avatar: true,
-              verification: {
-                select: {
-                  type: true,
-                  expiresAt: true,
-                },
-              },
+            include: {
+              verification: true,
             },
           },
         },
         orderBy: [
-          { role: "asc" }, // Owner first, then Admin, Moderator, Member
+          { role: "desc" }, // Owner first (OWNER > ADMIN > MEMBER)
           { joinedAt: "asc" },
         ],
         skip,
@@ -697,35 +784,111 @@ export class RoomsService {
       }),
     ]);
 
-    // Add online status and verification type
+    // Add online status and format like getActiveMembers
     const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
     const now = new Date();
-    const membersWithOnline = members.map(
-      (
-        m: RoomMember & {
-          user: {
-            id: string;
-            username: string;
-            displayName: string | null;
-            avatar: string | null;
-            verification: { type: string; expiresAt: Date } | null;
-          };
-        },
-      ) => {
-        const hasActiveVerification = m.user.verification && 
-          new Date(m.user.verification.expiresAt) > now;
-        return {
-          ...m,
-          isOnline: onlineUsers.includes(m.userId),
-          verificationType: hasActiveVerification ? m.user.verification?.type : null,
-        };
-      },
-    );
+    
+    const formattedMembers = members.map((m) => {
+      const hasActiveVerification = m.user?.verification && 
+        new Date(m.user.verification.expiresAt) > now;
+      
+      // Convert BigInt numericId to string for JSON serialization
+      const userNumericId = m.user?.numericId ? m.user.numericId.toString() : null;
+      
+      return {
+        odlive: m.userId,
+        odId: m.userId,
+        userId: m.userId,
+        id: m.id,
+        userName: m.user?.displayName || m.user?.username || 'Unknown',
+        displayName: m.user?.displayName || null,
+        username: m.user?.username || null,
+        userPhoto: m.user?.avatar || null,
+        avatar: m.user?.avatar || null,
+        role: m.role.toLowerCase(), // owner, admin, member
+        roleEnum: m.role,
+        status: 'listening',
+        joinedAt: m.joinedAt.toISOString(),
+        customId: userNumericId,
+        numericId: userNumericId,
+        userLevel: 1,
+        level: 1,
+        badge: null,
+        isVip: hasActiveVerification,
+        verificationType: hasActiveVerification ? m.user?.verification?.type : null,
+        isOnline: onlineUsers.includes(m.userId),
+      };
+    });
 
     return {
-      data: membersWithOnline,
+      members: formattedMembers,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  // ================================
+  // MEMBERS COUNT AND ACTIVE
+  // ================================
+
+  async getMembersCount(roomId: string) {
+    const count = await this.prisma.roomMember.count({
+      where: { roomId, leftAt: null, isBanned: false },
+    });
+    return { count };
+  }
+
+  async getActiveMembers(roomId: string) {
+    const members = await this.prisma.roomMember.findMany({
+      where: { roomId, leftAt: null, isBanned: false },
+      include: {
+        user: {
+          include: {
+            verification: true,
+          },
+        },
+      },
+      orderBy: [
+        { role: "desc" }, // Owner first (OWNER > ADMIN > MEMBER)
+        { joinedAt: "asc" },
+      ],
+    });
+
+    const onlineUsers = await this.redis.getRoomOnlineUsers(roomId);
+    const now = new Date();
+
+    const formattedMembers = members.map((m) => {
+      const hasActiveVerification = m.user?.verification && 
+        new Date(m.user.verification.expiresAt) > now;
+      
+      // Convert BigInt numericId to string for JSON serialization
+      const userNumericId = m.user?.numericId ? m.user.numericId.toString() : null;
+      
+      return {
+        odlive: m.userId,
+        odId: m.userId,
+        userId: m.userId,
+        id: m.id,
+        userName: m.user?.displayName || m.user?.username || 'Unknown',
+        displayName: m.user?.displayName || null,
+        username: m.user?.username || null,
+        userPhoto: m.user?.avatar || null,
+        avatar: m.user?.avatar || null,
+        role: m.role.toLowerCase(), // owner, admin, member
+        roleEnum: m.role,
+        status: 'listening',
+        joinedAt: m.joinedAt.toISOString(),
+        customId: userNumericId,
+        numericId: userNumericId,
+        userLevel: 1, // Default level - no level field in User model
+        level: 1,
+        badge: null,
+        isVip: hasActiveVerification,
+        verificationType: hasActiveVerification ? m.user?.verification?.type : null,
+        isOnline: onlineUsers.includes(m.userId),
+      };
+    });
+
+    return { members: formattedMembers };
   }
 
   // ================================

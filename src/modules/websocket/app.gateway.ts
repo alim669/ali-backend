@@ -448,6 +448,15 @@ export class AppGateway
     this.logger.debug(`📡 [EMIT] ${event} -> room:${roomId}`);
   }
 
+  /**
+   * Emit event to a specific user by userId (public method for other services)
+   */
+  public emitToUser(userId: string, event: string, data: any) {
+    // Find all sockets for this user and emit to them
+    this.server.to(`user:${userId}`).emit(event, data);
+    this.logger.debug(`📡 [EMIT] ${event} -> user:${userId}`);
+  }
+
   // ================================
   // GAME MATCHMAKING HELPERS
   // ================================

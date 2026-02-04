@@ -179,6 +179,8 @@ export class AppGateway
   private socketToUser = new Map<string, string>();
   // Room presence: roomId -> Set of userIds (in-memory for fast lookups)
   private roomPresence = new Map<string, Set<string>>();
+  // 🔧 Cache للتوثيق - يحتفظ بنوع التوثيق لكل مستخدم للرسائل الفورية
+  private verificationCache = new Map<string, { type: string; expiresAt: Date }>();
   // Track reconnection state to prevent duplicate join notifications
   private recentJoins = new Map<string, number>(); // `${roomId}:${userId}` -> timestamp
   // Heartbeat interval for stale connection cleanup
@@ -345,6 +347,39 @@ export class AppGateway
   }
 
   // ================================
+  // ================================
+  // VERIFICATION CACHE HELPERS
+  // ================================
+
+  /**
+   * Get cached verification type for a user
+   * Returns null if not cached or expired
+   */
+  private getCachedVerification(userId: string): string | null {
+    const cached = this.verificationCache.get(userId);
+    if (!cached) return null;
+    if (cached.expiresAt && cached.expiresAt < new Date()) {
+      this.verificationCache.delete(userId);
+      return null;
+    }
+    return cached.type;
+  }
+
+  /**
+   * Update verification cache for a user
+   * Pass null type to remove from cache
+   */
+  private updateVerificationCache(userId: string, type: string | null, expiresAt?: Date) {
+    if (type && type.length > 0) {
+      this.verificationCache.set(userId, {
+        type,
+        expiresAt: expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // Default 1 year
+      });
+    } else {
+      this.verificationCache.delete(userId);
+    }
+  }
+
   // UNIFIED ROOM EVENT BROADCASTING
   // ================================
 
@@ -430,6 +465,56 @@ export class AppGateway
       if (roomUsers.size === 0) {
         this.roomPresence.delete(roomId);
       }
+    }
+  }
+
+  /**
+   * Finalize user leaving room (remove from Redis and broadcast)
+   * Called after grace period expires or for immediate leaves
+   * CRITICAL: This is the ONLY place where leave is finalized
+   */
+  private async finalizeLeave(roomId: string, userId: string, user: { username?: string; displayName?: string; avatar?: string }) {
+    try {
+      // 🔧 ATOMIC: Remove from Redis and check if actually removed
+      const wasRemoved = await this.redis.removeUserFromRoom(roomId, userId);
+      
+      if (!wasRemoved) {
+        this.logger.debug(`📤 [LEAVE] User ${user.username} was already removed from room ${roomId}`);
+        return;
+      }
+      
+      // 🔢 Increment presence version AFTER mutation
+      const presenceVersion = await this.redis.incrementPresenceVersion(roomId);
+
+      // 📊 Get updated online count from Redis (authoritative)
+      const onlineCount = await this.redis.getRoomOnlineCount(roomId);
+
+      const leaveEventData = {
+        userId,
+        username: user.username,
+        displayName: user.displayName,
+        reason: "disconnect",
+        timestamp: new Date().toISOString(),
+        onlineCount,
+        presenceVersion,
+        serverTs: Date.now(),
+      };
+
+      // Broadcast using unified event system
+      this.broadcastRoomEvent(roomId, {
+        type: "user_left",
+        roomId,
+        id: this.generateEventId(),
+        senderId: userId,
+        senderName: user.displayName || user.username || userId,
+        senderAvatar: user.avatar,
+        serverTs: Date.now(),
+        data: leaveEventData,
+      });
+
+      this.logger.log(`📤 [LEAVE] Finalized: ${user.username} left room ${roomId} (v${presenceVersion}, count=${onlineCount})`);
+    } catch (error) {
+      this.logger.error(`❌ [LEAVE] Error finalizing leave: ${error.message}`);
     }
   }
 
@@ -577,6 +662,12 @@ export class AppGateway
           role: true,
           status: true,
           avatar: true,
+          verification: {
+            select: {
+              type: true,
+              expiresAt: true,
+            },
+          },
         },
       });
 
@@ -616,6 +707,12 @@ export class AppGateway
       client.connectedAt = connectionTime;
       client.lastHeartbeat = connectionTime;
       client.joinedRooms = new Set();
+
+      // 🔧 Cache verification status on connection
+      const now = new Date();
+      if (user.verification && user.verification.expiresAt > now) {
+        this.updateVerificationCache(user.id, user.verification.type, user.verification.expiresAt);
+      }
 
       // Track connection (support multiple connections per user)
       // Diagnosis: relying on a single socket causes flicker when user opens multiple screens.
@@ -1624,121 +1721,226 @@ export class AppGateway
   @SubscribeMessage("join_room")
   async handleJoinRoom(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: { roomId: string; clientTs?: number },
   ) {
+    const serverTs = Date.now();
+    const correlationId = `join_${serverTs}_${Math.random().toString(36).substr(2, 6)}`;
+    
     if (!client.user) {
       return {
         success: false,
         error: "NOT_AUTHENTICATED",
         message: "غير مصرح",
+        correlationId,
       };
     }
 
-    const { roomId } = data;
+    const { roomId, clientTs } = data;
+    const userId = client.user.id;
+
+    // Log latency if client sent timestamp
+    if (clientTs) {
+      const latency = serverTs - clientTs;
+      if (latency > 150) {
+        this.logger.warn(`⚠️ [JOIN] High latency detected: ${latency}ms (correlationId: ${correlationId})`);
+      }
+    }
 
     if (!roomId) {
       return {
         success: false,
         error: "INVALID_ROOM_ID",
         message: "معرف الغرفة مطلوب",
+        correlationId,
       };
     }
 
     try {
-      // Check if room exists
-      const room = await this.prisma.room.findUnique({
-        where: { id: roomId },
-        select: { id: true, name: true, status: true, maxMembers: true },
-      });
-
-      if (!room) {
-        this.logger.warn(
-          `🚪 [JOIN] User ${client.user.username} tried to join non-existent room: ${roomId}`,
-        );
-        return {
-          success: false,
-          error: "ROOM_NOT_FOUND",
-          message: "الغرفة غير موجودة",
-        };
-      }
-
-      if (room.status !== "ACTIVE") {
-        return {
-          success: false,
-          error: "ROOM_INACTIVE",
-          message: "الغرفة غير نشطة",
-        };
-      }
-
-      // Verify user is member of the room
-      const membership = await this.prisma.roomMember.findUnique({
-        where: { roomId_userId: { roomId, userId: client.user.id } },
-      });
-
-      if (!membership) {
-        return {
-          success: false,
-          error: "NOT_A_MEMBER",
-          message: "أنت لست عضواً في هذه الغرفة",
-        };
-      }
-
-      if (membership.isBanned) {
-        const bannedMessage = membership.bannedUntil
-          ? `أنت محظور حتى ${membership.bannedUntil.toISOString()}`
-          : "أنت محظور من هذه الغرفة";
-        return { success: false, error: "USER_BANNED", message: bannedMessage };
-      }
-
-      if (membership.leftAt) {
-        // User left before, rejoin
-        await this.prisma.roomMember.update({
-          where: { id: membership.id },
-          data: { leftAt: null, joinedAt: new Date() },
-        });
-      }
-
-      // Check if already in this room (prevent duplicate notifications on reconnect)
-      const isReconnect = client.joinedRooms?.has(roomId);
-      const isDuplicate = this.isDuplicateJoin(roomId, client.user.id);
-
-      if (isReconnect) {
-        this.logger.debug(
-          `🚪 [JOIN] User ${client.user.username} already in room ${roomId} (reconnect)`,
-        );
+      // 🔒 DISTRIBUTED LOCK: Prevent race conditions on rapid reconnects
+      const lockKey = `room:${roomId}:join_lock:${userId}`;
+      const gotLock = await this.redis.acquireLock(lockKey, 5);
+      
+      if (!gotLock) {
+        // Another join in progress, wait and return current state
+        this.logger.debug(`🔒 [JOIN] Lock held for ${client.user.username} in room ${roomId}, returning current state`);
         const onlineUsers = await this.getRoomOnlineUsersDetailed(roomId);
-        return { success: true, roomId, onlineUsers, alreadyJoined: true };
+        return { 
+          success: true, 
+          roomId, 
+          onlineUsers, 
+          alreadyJoined: true,
+          correlationId,
+        };
       }
 
-      // Join socket room
-      client.join(`room:${roomId}`);
+      try {
+        // ⏰ Check if user was in grace period (quick reconnect)
+        const wasInGrace = await this.redis.isInGracePeriod(roomId, userId);
+        if (wasInGrace) {
+          // Clear the grace period, don't broadcast user_joined again
+          await this.redis.clearGracePeriod(roomId, userId);
+          this.logger.log(`⏰ [JOIN] User ${client.user.username} reconnected within grace period (no broadcast)`);
+        }
 
-      // Track in client's joined rooms
-      if (!client.joinedRooms) {
-        client.joinedRooms = new Set();
-      }
-      client.joinedRooms.add(roomId);
+        // Check if room exists
+        const room = await this.prisma.room.findUnique({
+          where: { id: roomId },
+          select: { id: true, name: true, status: true, maxMembers: true },
+        });
 
-      // Add to presence tracking
-      this.addToRoomPresence(roomId, client.user.id);
+        if (!room) {
+          this.logger.warn(
+            `🚪 [JOIN] User ${client.user.username} tried to join non-existent room: ${roomId}`,
+          );
+          return {
+            success: false,
+            error: "ROOM_NOT_FOUND",
+            message: "الغرفة غير موجودة",
+            correlationId,
+          };
+        }
 
-      // Add to Redis online list
-      await this.redis.addUserToRoom(roomId, client.user.id);
+        if (room.status !== "ACTIVE") {
+          return {
+            success: false,
+            error: "ROOM_INACTIVE",
+            message: "الغرفة غير نشطة",
+            correlationId,
+          };
+        }
 
-      // Get online members (including current user)
-      const onlineUsers = await this.getRoomOnlineUsersDetailed(roomId);
+        // 🚫 CHECK BAN FROM REDIS CACHE FIRST (faster than DB)
+        const banCheck = await this.redis.isBanned(roomId, userId);
+        if (banCheck.banned) {
+          const expiresMsg = banCheck.banInfo?.expiresAt 
+            ? ` حتى ${new Date(banCheck.banInfo.expiresAt).toISOString()}`
+            : '';
+          return { 
+            success: false, 
+            error: "USER_BANNED", 
+            message: `أنت محظور من هذه الغرفة${expiresMsg}`,
+            correlationId,
+          };
+        }
 
-      // Only broadcast user_joined if this is NOT a duplicate within the window
-      if (!isDuplicate) {
+        // Verify user is member of the room
+        const membership = await this.prisma.roomMember.findUnique({
+          where: { roomId_userId: { roomId, userId } },
+        });
+
+        if (!membership) {
+          return {
+            success: false,
+            error: "NOT_A_MEMBER",
+            message: "أنت لست عضواً في هذه الغرفة",
+            correlationId,
+          };
+        }
+
+        if (membership.isBanned) {
+          // Cache the ban in Redis for future fast lookups
+          await this.redis.cacheBan(roomId, userId, {
+            bannedBy: 'system',
+            bannedAt: Date.now(),
+            expiresAt: membership.bannedUntil?.getTime(),
+          });
+          
+          const bannedMessage = membership.bannedUntil
+            ? `أنت محظور حتى ${membership.bannedUntil.toISOString()}`
+            : "أنت محظور من هذه الغرفة";
+          return { success: false, error: "USER_BANNED", message: bannedMessage, correlationId };
+        }
+
+        if (membership.leftAt) {
+          // User left before, rejoin
+          await this.prisma.roomMember.update({
+            where: { id: membership.id },
+            data: { leftAt: null, joinedAt: new Date() },
+          });
+        }
+
+        // Check if already in this room (prevent duplicate notifications on reconnect)
+        const isReconnect = client.joinedRooms?.has(roomId);
+        const isDuplicate = this.isDuplicateJoin(roomId, userId);
+
+        if (isReconnect && !wasInGrace) {
+          this.logger.debug(
+            `🚪 [JOIN] User ${client.user.username} already in room ${roomId} (reconnect)`,
+          );
+          const snapshot = await this.redis.getRoomPresenceSnapshot(roomId);
+          const onlineUsers = await this.getRoomOnlineUsersDetailed(roomId);
+          return { 
+            success: true, 
+            roomId, 
+            onlineUsers, 
+            onlineCount: onlineUsers.length,
+            presenceVersion: snapshot.version,
+            alreadyJoined: true, 
+            correlationId 
+          };
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // 🔒 CRITICAL: CORRECT JOIN ORDER
+        // 1. socket.join (server room)
+        // 2. Track socket in user's room sockets
+        // 3. Add user to Redis SET (only if first socket)
+        // 4. Increment version (only if state changed)
+        // 5. Get count from Redis
+        // 6. Broadcast (only if state changed)
+        // 7. Send snapshot to joining client
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // 1️⃣ Join socket room FIRST
+        client.join(`room:${roomId}`);
+
+        // Track in client's joined rooms
+        if (!client.joinedRooms) {
+          client.joinedRooms = new Set();
+        }
+        client.joinedRooms.add(roomId);
+
+        // Add to in-memory presence
+        this.addToRoomPresence(roomId, userId);
+
+        // 2️⃣ Track this socket in user's room connections
+        const socketCount = await this.redis.addUserSocketToRoom(roomId, userId, client.id);
+        const isFirstSocket = socketCount === 1;
+
+        // 3️⃣ Add user to Redis online SET (only adds if new)
+        const wasNewlyAdded = await this.redis.addUserToRoom(roomId, userId);
+
+        // 4️⃣ Increment version ONLY if user was newly added
+        let presenceVersion: number;
+        if (wasNewlyAdded) {
+          presenceVersion = await this.redis.incrementPresenceVersion(roomId);
+        } else {
+          const snapshot = await this.redis.getRoomPresenceSnapshot(roomId);
+          presenceVersion = snapshot.version;
+        }
+
+        // 5️⃣ Get authoritative count from Redis
+        const onlineCount = await this.redis.getRoomOnlineCount(roomId);
+
+        // Get online members for snapshot
+        const onlineUsers = await this.getRoomOnlineUsersDetailed(roomId);
+
+        // 6️⃣ Only broadcast user_joined if user was NEWLY added (not reconnect)
+        const shouldBroadcast = wasNewlyAdded && !wasInGrace && !isDuplicate;
+      
+      if (shouldBroadcast) {
         const joinEventData = {
-          userId: client.user.id,
+          userId,
           name: client.user.displayName || client.user.username,
           username: client.user.username,
           displayName: client.user.displayName,
           avatar: client.user.avatar,
           role: membership.role,
           timestamp: new Date().toISOString(),
-          onlineCount: onlineUsers.length,
+          onlineCount,
+          presenceVersion,
+          correlationId,
+          serverTs: Date.now(),
         };
 
         // Broadcast using unified event system
@@ -1746,7 +1948,7 @@ export class AppGateway
           type: "user_joined",
           roomId,
           id: this.generateEventId(),
-          senderId: client.user.id,
+          senderId: userId,
           senderName: client.user.displayName,
           senderAvatar: client.user.avatar,
           serverTs: Date.now(),
@@ -1754,16 +1956,36 @@ export class AppGateway
         });
 
         this.logger.log(
-          `✅ [JOIN] User ${client.user.username} joined room ${roomId} (online: ${onlineUsers.length})`,
+          `✅ [JOIN] User ${client.user.username} joined room ${roomId} (v${presenceVersion}, count=${onlineCount}, isFirst=${isFirstSocket}) [${correlationId}]`,
         );
       } else {
         this.logger.debug(
-          `🚪 [JOIN] Duplicate join suppressed for ${client.user.username} in room ${roomId}`,
+          `🚪 [JOIN] Suppressed broadcast for ${client.user.username} in room ${roomId} (wasNew=${wasNewlyAdded}, grace=${wasInGrace}, dup=${isDuplicate}) [${correlationId}]`,
         );
       }
 
-      // Send current online list to the joining user
-      client.emit("onlineUsers", onlineUsers);
+      // 7️⃣ Send presence snapshot to the joining user (authoritative init)
+      client.emit("members_snapshot", {
+        roomId,
+        members: onlineUsers,
+        onlineCount,
+        presenceVersion,
+        serverTs: Date.now(),
+      });
+      
+      // Also emit legacy format with version
+      client.emit("onlineUsers", {
+        users: onlineUsers,
+        presenceVersion,
+        serverTs: Date.now(),
+      });
+
+      // Cache user info for future fast lookups
+      await this.redis.cacheUserPublicInfo(userId, {
+        name: client.user.displayName || client.user.username,
+        avatar: client.user.avatar,
+        numericId: (client.user as any).numericId?.toString(),
+      });
 
       // Send current room music state (if exists)
       const musicState = this.roomMusicState.get(roomId);
@@ -1776,9 +1998,17 @@ export class AppGateway
         roomId,
         roomName: room.name,
         onlineUsers,
-        onlineCount: onlineUsers.length,
+        onlineCount,
+        presenceVersion,
         userRole: membership.role,
+        correlationId,
+        serverTs: Date.now(),
       };
+      
+      } finally {
+        // 🔓 Always release the lock
+        await this.redis.releaseLock(lockKey);
+      }
     } catch (error) {
       this.logger.error(
         `❌ [JOIN] Error joining room ${roomId}: ${error.message}`,
@@ -1787,6 +2017,7 @@ export class AppGateway
         success: false,
         error: "JOIN_ERROR",
         message: "حدث خطأ أثناء الانضمام",
+        correlationId,
       };
     }
   }
@@ -1803,13 +2034,15 @@ export class AppGateway
   @SubscribeMessage("leave_room")
   async handleLeaveRoom(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() data: { roomId: string },
+    @MessageBody() data: { roomId: string; graceful?: boolean },
   ) {
     if (!client.user) {
       return { success: false, error: "NOT_AUTHENTICATED" };
     }
 
-    const { roomId } = data;
+    const { roomId, graceful = false } = data;
+    const userId = client.user.id;
+    const GRACE_PERIOD_MS = 10000; // 10 seconds
 
     try {
       // Leave socket room
@@ -1818,35 +2051,45 @@ export class AppGateway
       // Remove from tracking
       client.joinedRooms?.delete(roomId);
 
-      // Remove from presence
-      this.removeFromRoomPresence(roomId, client.user.id);
+      // Remove from in-memory presence
+      this.removeFromRoomPresence(roomId, userId);
 
-      // Remove from Redis
-      await this.redis.removeUserFromRoom(roomId, client.user.id);
+      // 🔌 Remove this socket from user's room connections (Redis-based tracking)
+      const remainingSockets = await this.redis.removeUserSocketFromRoom(roomId, userId, client.id);
+      
+      // If user has other sockets in room, don't remove from Redis or broadcast
+      if (remainingSockets > 0) {
+        this.logger.debug(
+          `🚪 [LEAVE] User ${client.user.username} left room ${roomId} but has ${remainingSockets} other sockets`,
+        );
+        return { success: true, roomId, otherSocketsActive: true, remainingSockets };
+      }
 
-      // Get updated online count
-      const onlineCount = await this.getRoomOnlineCount(roomId);
+      // If graceful leave (e.g., app going to background), set grace period
+      // This prevents user_left broadcast for quick reconnects
+      if (graceful) {
+        await this.redis.setLeaveGrace(roomId, userId, GRACE_PERIOD_MS);
+        this.logger.log(
+          `⏰ [LEAVE] User ${client.user.username} entered grace period for room ${roomId}`,
+        );
+        
+        // Schedule actual removal after grace period
+        setTimeout(async () => {
+          const stillInGrace = await this.redis.isInGracePeriod(roomId, userId);
+          if (stillInGrace) {
+            // Grace period expired without reconnect - actually remove
+            await this.redis.clearGracePeriod(roomId, userId);
+            await this.redis.clearUserSocketsInRoom(roomId, userId);
+            await this.finalizeLeave(roomId, userId, client.user!);
+          }
+        }, GRACE_PERIOD_MS);
+        
+        return { success: true, roomId, gracePeriod: true };
+      }
 
-      const leaveEventData = {
-        userId: client.user.id,
-        username: client.user.username,
-        displayName: client.user.displayName,
-        reason: "manual",
-        timestamp: new Date().toISOString(),
-        onlineCount,
-      };
-
-      // Broadcast using unified event system
-      this.broadcastRoomEvent(roomId, {
-        type: "user_left",
-        roomId,
-        id: this.generateEventId(),
-        senderId: client.user.id,
-        senderName: client.user.displayName,
-        senderAvatar: client.user.avatar,
-        serverTs: Date.now(),
-        data: leaveEventData,
-      });
+      // Immediate leave - clear sockets and finalize
+      await this.redis.clearUserSocketsInRoom(roomId, userId);
+      await this.finalizeLeave(roomId, userId, client.user);
 
       this.logger.log(
         `✅ [LEAVE] User ${client.user.username} left room ${roomId}`,
@@ -2244,14 +2487,25 @@ export class AppGateway
       type?: string;
       metadata?: any;
       tempId?: string;
+      clientTs?: number; // Client timestamp for latency measurement
     },
   ) {
+    const serverTs = Date.now();
+    const correlationId = `msg_${serverTs}_${Math.random().toString(36).substr(2, 6)}`;
+    
     if (!client.user) {
       return {
         success: false,
         error: "NOT_AUTHENTICATED",
         state: MessageState.SENDING,
+        correlationId,
       };
+    }
+    
+    // Track latency
+    const { clientTs } = data;
+    if (clientTs && serverTs - clientTs > 150) {
+      this.logger.warn(`⚠️ [MESSAGE] High latency: ${serverTs - clientTs}ms [${correlationId}]`);
     }
 
     const { roomId, content, type: rawType = "TEXT", metadata, tempId } = data;
@@ -2285,9 +2539,10 @@ export class AppGateway
         }
       }
 
-      // Verify membership and check if muted
+      // Verify membership and check if muted (use cached check when possible)
       const membership = await this.prisma.roomMember.findUnique({
         where: { roomId_userId: { roomId, userId: client.user.id } },
+        select: { id: true, role: true, leftAt: true, isBanned: true, isMuted: true, mutedUntil: true },
       });
 
       if (!membership || membership.leftAt || membership.isBanned) {
@@ -2302,6 +2557,7 @@ export class AppGateway
           success: false,
           error: "NOT_A_MEMBER",
           message: "لست عضواً في هذه الغرفة",
+          correlationId,
         };
       }
 
@@ -2321,41 +2577,120 @@ export class AppGateway
             success: false,
             error: "USER_MUTED",
             message: `أنت كتوم لمدة ${remainingTime} دقيقة`,
+            correlationId,
           };
         }
-        // Unmute if time expired
-        await this.prisma.roomMember.update({
+        // Unmute if time expired (async - don't block)
+        this.prisma.roomMember.update({
           where: { id: membership.id },
           data: { isMuted: false, mutedUntil: null },
-        });
+        }).catch(e => this.logger.error(`Unmute error: ${e.message}`));
       }
 
-      // Create message in database (IMPORTANT: store before sending)
-      const message = await this.prisma.message.create({
-        data: {
-          roomId,
-          senderId: client.user.id,
-          type: type as any,
-          content,
-          metadata: { ...(metadata || {}), tempId: clientMessageId || tempId },
-        },
-        include: {
-          sender: {
-            select: {
-              id: true,
-              numericId: true,
-              username: true,
-              displayName: true,
-              avatar: true,
-              verification: {
-                select: {
-                  type: true,
-                  expiresAt: true,
+      // 🚀 OPTIMISTIC BROADCAST: Send to room immediately, then persist
+      // This reduces perceived latency significantly
+      const senderId = client.user!.id; // Store for transaction closure
+      const optimisticId = clientMessageId || tempId || this.generateEventId();
+      const broadcastTs = Date.now();
+      
+      // 🔧 Get cached verification for instant display
+      const cachedVerification = this.getCachedVerification(client.user.id);
+      
+      // Prepare optimistic message data
+      const optimisticMessageData = {
+        id: optimisticId,
+        roomId,
+        senderId: client.user.id,
+        senderNumericId: (client.user as any).numericId?.toString(),
+        senderName: client.user.displayName || client.user.username,
+        senderAvatar: client.user.avatar,
+        senderVerificationType: cachedVerification, // 🔧 Use cached verification
+        type,
+        content,
+        metadata: { ...(metadata || {}), tempId: clientMessageId || tempId },
+        createdAt: new Date().toISOString(),
+        tempId,
+        optimistic: true, // Flag for client
+        serverTs: broadcastTs,
+        correlationId,
+      };
+
+      // 📡 BROADCAST IMMEDIATELY (before DB write)
+      this.broadcastRoomEvent(roomId, {
+        type: "message",
+        roomId,
+        id: optimisticId,
+        senderId: client.user.id,
+        senderName: client.user.displayName || client.user.username,
+        senderAvatar: client.user.avatar ?? undefined,
+        senderVerificationType: cachedVerification, // 🔧 Use cached verification
+        serverTs: broadcastTs,
+        data: optimisticMessageData,
+      });
+
+      // Emit sending confirmation to sender
+      client.emit("message_state", {
+        tempId: clientMessageId || tempId,
+        state: MessageState.SENDING,
+        optimisticId,
+        serverTs: broadcastTs,
+      });
+
+      // 💾 PERSIST TO DATABASE with 75 message limit enforcement
+      const message = await this.prisma.$transaction(async (tx) => {
+        // 1️⃣ Create the message
+        const newMessage = await tx.message.create({
+          data: {
+            roomId,
+            senderId,
+            type: type as any,
+            content,
+            metadata: { ...(metadata || {}), tempId: clientMessageId || tempId, optimisticId },
+          },
+          include: {
+            sender: {
+              select: {
+                id: true,
+                numericId: true,
+                username: true,
+                displayName: true,
+                avatar: true,
+                verification: {
+                  select: {
+                    type: true,
+                    expiresAt: true,
+                  },
                 },
               },
             },
           },
-        },
+        });
+        
+        // 2️⃣ Enforce 75 message limit - FIFO deletion
+        const MAX_MESSAGES = 75;
+        const count = await tx.message.count({
+          where: { roomId, isDeleted: false },
+        });
+        
+        if (count > MAX_MESSAGES) {
+          const excess = count - MAX_MESSAGES;
+          const oldestMessages = await tx.message.findMany({
+            where: { roomId, isDeleted: false },
+            orderBy: { createdAt: 'asc' },
+            take: excess,
+            select: { id: true },
+          });
+          
+          if (oldestMessages.length > 0) {
+            await tx.message.updateMany({
+              where: { id: { in: oldestMessages.map((m: any) => m.id) } },
+              data: { isDeleted: true },
+            });
+            this.logger.debug(`🗑️ [FIFO] Deleted ${excess} oldest messages in room ${roomId}`);
+          }
+        }
+        
+        return newMessage;
       });
 
       const now = new Date();
@@ -2365,13 +2700,24 @@ export class AppGateway
           ? message.sender.verification.type
           : null;
 
-      // Emit sent state to sender
+      // 🔧 Update verification cache with DB data
+      if (message.sender?.verification && message.sender.verification.expiresAt > now) {
+        this.updateVerificationCache(
+          client.user.id, 
+          message.sender.verification.type,
+          message.sender.verification.expiresAt
+        );
+      }
+
+      // Emit confirmed state to sender with real message ID
       if (clientMessageId || tempId) {
         client.emit("message_state", {
           tempId: clientMessageId || tempId,
+          optimisticId,
           messageId: message.id,
           state: MessageState.SENT,
           createdAt: message.createdAt.toISOString(),
+          confirmed: true,
         });
       }
 
@@ -2383,49 +2729,31 @@ export class AppGateway
         });
       }
 
-      // Prepare message data for broadcast
-      const messageData = {
-        id: message.id,
-        roomId: message.roomId,
-        senderId: message.senderId,
-        senderNumericId: message.sender.numericId?.toString(),
-        senderName: message.sender.displayName,
-        senderAvatar: message.sender.avatar,
-        senderVerificationType,
-        type: message.type,
-        content: message.content,
-        metadata: message.metadata,
+      // 📢 EMIT CONFIRMATION with real message ID for reconciliation
+      this.server.to(`room:${roomId}`).emit("message_confirmed", {
+        optimisticId,
+        messageId: message.id,
         createdAt: message.createdAt.toISOString(),
-        tempId, // Include for client reconciliation
-      };
-
-      // Broadcast using unified event system
-      this.broadcastRoomEvent(roomId, {
-        type: "message",
-        roomId,
-        id: message.id,
-        senderId: client.user.id,
-        senderNumericId: message.sender.numericId?.toString(),
-        senderName: message.sender.displayName,
-        senderAvatar: message.sender.avatar ?? undefined,
         senderVerificationType,
-        serverTs: message.createdAt.getTime(),
-        data: messageData,
       });
 
-      // Remove typing indicator
-      await this.redis.removeTyping(roomId, client.user.id);
+      // Remove typing indicator (async)
+      this.redis.removeTyping(roomId, client.user.id).catch(() => {});
 
+      const totalLatency = Date.now() - serverTs;
       this.logger.debug(
-        `💬 [MESSAGE] ${client.user.username} -> room ${roomId}: ${content.substring(0, 50)}...`,
+        `💬 [MESSAGE] ${client.user.username} -> room ${roomId}: ${content.substring(0, 50)}... [${totalLatency}ms, ${correlationId}]`,
       );
 
       return {
         success: true,
         messageId: message.id,
+        optimisticId,
         tempId,
         state: MessageState.SENT,
         createdAt: message.createdAt.toISOString(),
+        latencyMs: totalLatency,
+        correlationId,
       };
     } catch (error) {
       this.logger.error(`❌ [MESSAGE] Error sending message: ${error.message}`, error.stack);
@@ -3417,13 +3745,41 @@ export class AppGateway
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() data: { roomId: string },
   ) {
+    return this._handleGetOnlineUsersInternal(client, data);
+  }
+
+  // 🔧 FIX: Also listen for camelCase event from Flutter
+  @SubscribeMessage("getOnlineUsers")
+  async handleGetOnlineUsersCamelCase(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() data: { roomId: string },
+  ) {
+    return this._handleGetOnlineUsersInternal(client, data);
+  }
+
+  private async _handleGetOnlineUsersInternal(
+    client: AuthenticatedSocket,
+    data: { roomId: string },
+  ) {
     const onlineUsers = await this.getRoomOnlineUsersDetailed(data.roomId);
     const onlineCount = onlineUsers.length;
+    
+    // Get current presence version
+    const snapshot = await this.redis.getRoomPresenceSnapshot(data.roomId);
+    const presenceVersion = snapshot.version;
+    
+    // Emit to client for event-based listeners (with version)
+    client.emit("onlineUsers", {
+      users: onlineUsers,
+      presenceVersion,
+      serverTs: Date.now(),
+    });
 
     return {
       success: true,
       onlineUsers,
       onlineCount,
+      presenceVersion,
     };
   }
 
@@ -3481,56 +3837,71 @@ export class AppGateway
 
   private async subscribeToRedisChannels() {
     // Subscribe to gift events from other instances
-    await this.redis.subscribe("gifts:sent", (message) => {
+    await this.redis.subscribe("gifts:sent", async (message) => {
       try {
         this.logger.log(`🎁📥 Received gift event from Redis: ${message.substring(0, 200)}...`);
         const parsedMessage = JSON.parse(message);
         const giftData = parsedMessage.data;
 
-        if (giftData?.roomId) {
-          // Prepare gift event data with sender/receiver info
-          const giftEventData = {
-            id: giftData.giftSend?.id || this.generateEventId(),
-            roomId: giftData.roomId,
-            senderId: giftData.senderId,
-            senderName: giftData.senderName || giftData.giftSend?.senderName || "Unknown",
-            senderAvatar: giftData.senderAvatar || giftData.giftSend?.senderAvatar,
-            receiverId: giftData.receiverId,
-            receiverName: giftData.receiverName || giftData.giftSend?.receiverName || "Unknown",
-            receiverAvatar: giftData.receiverAvatar || giftData.giftSend?.receiverAvatar,
-            giftId: giftData.gift?.id,
-            giftName: giftData.gift?.name,
-            giftImage: giftData.gift?.imageUrl,
-            giftPrice: giftData.gift?.price,
-            quantity: giftData.quantity || giftData.giftSend?.quantity || 1,
-            totalValue: giftData.totalPrice || giftData.giftSend?.totalPrice || 0,
-            createdAt: new Date().toISOString(),
-          };
-
-          this.logger.log(`🎁📡 Broadcasting gift to room:${giftData.roomId} - from ${giftEventData.senderName} to ${giftEventData.receiverName}`);
-
-          // Broadcast using unified event system
-          this.broadcastRoomEvent(giftData.roomId, {
-            type: "gift",
-            roomId: giftData.roomId,
-            id: giftEventData.id,
-            senderId: giftData.senderId,
-            senderName: giftEventData.senderName,
-            senderAvatar: giftEventData.senderAvatar,
-            serverTs: Date.now(),
-            data: giftEventData,
-          });
-          
-          this.logger.log(`🎁✅ Gift broadcast complete for room:${giftData.roomId}`);
-        } else {
+        if (!giftData?.roomId) {
           this.logger.warn(`🎁⚠️ Gift event missing roomId: ${JSON.stringify(giftData)}`);
+          return;
         }
 
-        // Also notify receiver directly
+        // 🔒 IDEMPOTENCY CHECK: Prevent duplicate broadcasts
+        const giftTxId = giftData.giftSend?.id || giftData.id || `${giftData.senderId}-${giftData.receiverId}-${Date.now()}`;
+        const isFirstTime = await this.redis.checkGiftIdempotency(giftTxId);
+        
+        if (!isFirstTime) {
+          this.logger.debug(`🎁🔄 Duplicate gift event ignored: ${giftTxId}`);
+          return;
+        }
+
+        // Prepare gift event data with sender/receiver info
+        const giftEventData = {
+          id: giftData.giftSend?.id || this.generateEventId(),
+          txId: giftTxId, // Include for client dedup
+          roomId: giftData.roomId,
+          senderId: giftData.senderId,
+          senderName: giftData.senderName || giftData.giftSend?.senderName || "Unknown",
+          senderAvatar: giftData.senderAvatar || giftData.giftSend?.senderAvatar,
+          receiverId: giftData.receiverId,
+          receiverName: giftData.receiverName || giftData.giftSend?.receiverName || "Unknown",
+          receiverAvatar: giftData.receiverAvatar || giftData.giftSend?.receiverAvatar,
+          giftId: giftData.gift?.id,
+          giftName: giftData.gift?.name,
+          giftImage: giftData.gift?.imageUrl,
+          giftPrice: giftData.gift?.price,
+          quantity: giftData.quantity || giftData.giftSend?.quantity || 1,
+          totalValue: giftData.totalPrice || giftData.giftSend?.totalPrice || 0,
+          createdAt: new Date().toISOString(),
+          serverTs: Date.now(),
+        };
+
+        this.logger.log(`🎁📡 Broadcasting gift to room:${giftData.roomId} - from ${giftEventData.senderName} to ${giftEventData.receiverName} [txId: ${giftTxId}]`);
+
+        // Broadcast using unified event system (to ALL users in room)
+        this.broadcastRoomEvent(giftData.roomId, {
+          type: "gift",
+          roomId: giftData.roomId,
+          id: giftEventData.id,
+          senderId: giftData.senderId,
+          senderName: giftEventData.senderName,
+          senderAvatar: giftEventData.senderAvatar,
+          serverTs: Date.now(),
+          data: giftEventData,
+        });
+        
+        // Mark gift as processed
+        await this.redis.markGiftProcessed(giftTxId, giftEventData.id);
+        
+        this.logger.log(`🎁✅ Gift broadcast complete for room:${giftData.roomId} [${giftTxId}]`);
+
+        // Also notify receiver directly (they may not be in the room)
         if (giftData?.receiverId) {
           this.server
             .to(`user:${giftData.receiverId}`)
-            .emit("gift_received", giftData);
+            .emit("gift_received", giftEventData);
         }
       } catch (e) {
         this.logger.error(`Failed to process gift event: ${e.message}`);
@@ -3770,11 +4141,9 @@ export class AppGateway
       this.logger.log(`🎁📡 Broadcasting gift to room:${roomId} via unified system`);
       
       // بث عبر الـ unified system (room_event)
+      // NOTE: broadcastRoomEvent already emits gift_sent + giftSent for backward compatibility
+      // DO NOT add additional emit calls here - it causes triple broadcast / double rendering
       this.broadcastRoomEvent(roomId, giftEvent);
-      
-      // بث إضافي للتأكد من وصول الهدية (backwards compatibility)
-      this.server.to(`room:${roomId}`).emit("gift_sent", giftData);
-      this.server.to(`room:${roomId}`).emit("giftSent", giftData);
       
       this.logger.log(`🎁✅ Gift broadcast complete to room:${roomId}`);
     }
@@ -3785,33 +4154,120 @@ export class AppGateway
   }
 
   // ================================
-  // ADMIN METHODS
+  // ADMIN METHODS (ENHANCED BAN ENFORCEMENT)
   // ================================
 
+  /**
+   * Immediately kick user from room (all their sockets)
+   */
   async kickUserFromRoom(
     roomId: string,
     userId: string,
     reason: string = "admin_action",
+    kickedBy?: string,
   ) {
+    this.logger.log(`🚫 [KICK] Kicking user ${userId} from room ${roomId}, reason: ${reason}`);
+    
     // Find all sockets for this user
     const userSockets = this.userConnections.get(userId);
-    if (!userSockets) return;
+    if (!userSockets || userSockets.size === 0) {
+      this.logger.debug(`🚫 [KICK] User ${userId} has no active sockets`);
+      // Still remove from Redis presence
+      await this.redis.removeUserFromRoom(roomId, userId);
+      return;
+    }
 
     const sockets = await this.server.fetchSockets();
+    let kickedCount = 0;
+    
     for (const socket of sockets) {
       if (userSockets.has(socket.id)) {
         const authSocket = socket as unknown as AuthenticatedSocket;
-        await this.forceLeaveRoom(authSocket, roomId, reason);
-
-        // Notify the kicked user
-        socket.emit("kicked_from_room", { roomId, reason });
+        
+        // Check if this socket is in this room
+        if (authSocket.joinedRooms?.has(roomId)) {
+          // Force leave the room
+          socket.leave(`room:${roomId}`);
+          authSocket.joinedRooms?.delete(roomId);
+          
+          // Notify the kicked socket immediately
+          socket.emit("kicked_from_room", { 
+            roomId, 
+            reason,
+            kickedBy,
+            serverTs: Date.now(),
+          });
+          
+          kickedCount++;
+        }
       }
     }
+
+    // Remove from presence tracking
+    this.removeFromRoomPresence(roomId, userId);
+    await this.redis.removeUserFromRoom(roomId, userId);
+    
+    // Increment presence version
+    await this.redis.incrementPresenceVersion(roomId);
+
+    // Get updated online count
+    const onlineCount = await this.getRoomOnlineCount(roomId);
+
+    // Broadcast to room that user was kicked
+    this.broadcastRoomEvent(roomId, {
+      type: "user_left",
+      roomId,
+      id: this.generateEventId(),
+      senderId: userId,
+      senderName: "system",
+      senderAvatar: undefined,
+      serverTs: Date.now(),
+      data: {
+        userId,
+        reason: "kicked",
+        kickedBy,
+        onlineCount,
+        serverTs: Date.now(),
+      },
+    });
+
+    // Also emit specific kicked event to room
+    this.server.to(`room:${roomId}`).emit("user_kicked", {
+      userId,
+      reason,
+      kickedBy,
+      onlineCount,
+      serverTs: Date.now(),
+    });
+
+    this.logger.log(`🚫 [KICK] Kicked ${kickedCount} socket(s) of user ${userId} from room ${roomId}`);
   }
 
-  async banUserFromRoom(roomId: string, userId: string, duration?: number) {
-    // First kick
-    await this.kickUserFromRoom(roomId, userId, "banned");
+  /**
+   * Ban user from room - kicks immediately and prevents rejoin
+   */
+  async banUserFromRoom(
+    roomId: string, 
+    userId: string, 
+    duration?: number,
+    bannedBy?: string,
+    reason?: string,
+  ) {
+    this.logger.log(`🔨 [BAN] Banning user ${userId} from room ${roomId}, duration: ${duration || 'permanent'}`);
+    
+    const banInfo = {
+      odaId: userId,
+      bannedBy: bannedBy || 'system',
+      reason: reason || 'تم حظرك من قبل مشرف الغرفة',
+      bannedAt: Date.now(),
+      expiresAt: duration ? Date.now() + duration * 60000 : undefined,
+    };
+
+    // 🔒 CACHE BAN IN REDIS (for fast lookup on rejoin attempts)
+    await this.redis.cacheBan(roomId, userId, banInfo);
+
+    // First kick immediately
+    await this.kickUserFromRoom(roomId, userId, "banned", bannedBy);
 
     // Update database
     await this.prisma.roomMember.updateMany({
@@ -3822,14 +4278,49 @@ export class AppGateway
       },
     });
 
-    // Notify user
+    // Notify user directly (in case they're still connected elsewhere)
     this.server.to(`user:${userId}`).emit("banned_from_room", {
       roomId,
       duration,
+      reason: banInfo.reason,
+      bannedBy,
+      expiresAt: banInfo.expiresAt,
       message: duration
         ? `تم حظرك لمدة ${duration} دقيقة`
-        : "تم حظرك من الغرفة",
+        : "تم حظرك من الغرفة بشكل دائم",
+      serverTs: Date.now(),
     });
+
+    this.logger.log(`🔨 [BAN] User ${userId} banned from room ${roomId} successfully`);
+  }
+
+  /**
+   * Unban user from room
+   */
+  async unbanUserFromRoom(roomId: string, userId: string, unbannedBy?: string) {
+    this.logger.log(`✅ [UNBAN] Unbanning user ${userId} from room ${roomId}`);
+    
+    // Remove from Redis cache
+    await this.redis.removeBanCache(roomId, userId);
+
+    // Update database
+    await this.prisma.roomMember.updateMany({
+      where: { roomId, userId },
+      data: {
+        isBanned: false,
+        bannedUntil: null,
+      },
+    });
+
+    // Notify user
+    this.server.to(`user:${userId}`).emit("unbanned_from_room", {
+      roomId,
+      unbannedBy,
+      message: "تم رفع الحظر عنك من الغرفة",
+      serverTs: Date.now(),
+    });
+
+    this.logger.log(`✅ [UNBAN] User ${userId} unbanned from room ${roomId}`);
   }
 
   // ================================

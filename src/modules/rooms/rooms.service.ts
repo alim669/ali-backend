@@ -40,6 +40,12 @@ export class RoomsService {
   ) {}
 
   // ================================
+  // ROOM CREATION CONSTANTS
+  // ================================
+  private readonly ROOM_CREATION_COST = 300000; // 300,000 نقطة
+  private readonly MAX_ROOMS_PER_USER = 1; // غرفة واحدة لكل مستخدم
+
+  // ================================
   // CREATE ROOM
   // ================================
 
@@ -47,6 +53,39 @@ export class RoomsService {
     this.logger.log(
       `📦 Creating room: name="${dto.name}", type="${dto.type}", userId="${userId}"`,
     );
+
+    // 🔒 التحقق من أن المستخدم لا يملك غرفة أخرى
+    const existingRoomsCount = await this.prisma.room.count({
+      where: {
+        ownerId: userId,
+        status: RoomStatus.ACTIVE,
+      },
+    });
+
+    if (existingRoomsCount >= this.MAX_ROOMS_PER_USER) {
+      throw new ConflictException({
+        error: 'MAX_ROOMS_REACHED',
+        message: 'لا يمكنك إنشاء أكثر من غرفة واحدة',
+        maxRooms: this.MAX_ROOMS_PER_USER,
+      });
+    }
+
+    // 💰 التحقق من رصيد المستخدم عبر Wallet
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+      select: { balance: true },
+    });
+
+    const userBalance = Number(wallet?.balance || 0);
+
+    if (userBalance < this.ROOM_CREATION_COST) {
+      throw new BadRequestException({
+        error: 'INSUFFICIENT_COINS',
+        message: `رصيدك غير كافي. تحتاج ${this.ROOM_CREATION_COST.toLocaleString()} نقطة`,
+        required: this.ROOM_CREATION_COST,
+        current: userBalance,
+      });
+    }
 
     let passwordHash: string | null = null;
 
@@ -56,7 +95,15 @@ export class RoomsService {
 
     const room = await this.prisma.$transaction(
       async (tx: Prisma.TransactionClient) => {
-        // Create room
+        // 💰 خصم النقاط من Wallet
+        await tx.wallet.update({
+          where: { userId },
+          data: { balance: { decrement: this.ROOM_CREATION_COST } },
+        });
+
+        this.logger.log(`💰 Deducted ${this.ROOM_CREATION_COST} coins from user ${userId}`);
+
+        // Create room with settings including category
         const newRoom = await tx.room.create({
           data: {
             name: dto.name,
@@ -68,6 +115,10 @@ export class RoomsService {
             isPasswordProtected: !!dto.password,
             passwordHash,
             currentMembers: 1,
+            settings: {
+              category: dto.settings?.category || 'chat',
+              createdWithCost: this.ROOM_CREATION_COST,
+            },
           },
         });
 
@@ -84,7 +135,7 @@ export class RoomsService {
       },
     );
 
-    this.logger.log(`User ${userId} created room ${room.id} (numericId: ${room.numericId})`);
+    this.logger.log(`User ${userId} created room ${room.id} (numericId: ${room.numericId}) - Cost: ${this.ROOM_CREATION_COST}`);
 
     return {
       id: room.id,
@@ -96,8 +147,56 @@ export class RoomsService {
       maxMembers: room.maxMembers,
       currentMembers: room.currentMembers,
       isPasswordProtected: room.isPasswordProtected,
-      ownerId: userId, // 🔐 إضافة ownerId في الاستجابة
+      ownerId: userId,
+      settings: room.settings,
       createdAt: room.createdAt,
+      cost: this.ROOM_CREATION_COST,
+    };
+  }
+
+  /**
+   * التحقق من إمكانية إنشاء غرفة للمستخدم
+   */
+  async canCreateRoom(userId: string): Promise<{
+    canCreate: boolean;
+    reason?: string;
+    cost: number;
+    userCoins: number;
+    existingRooms: number;
+    maxRooms: number;
+  }> {
+    const [wallet, existingRoomsCount] = await Promise.all([
+      this.prisma.wallet.findUnique({
+        where: { userId },
+        select: { balance: true },
+      }),
+      this.prisma.room.count({
+        where: {
+          ownerId: userId,
+          status: RoomStatus.ACTIVE,
+        },
+      }),
+    ]);
+
+    const userBalance = Number(wallet?.balance || 0);
+    const canCreate = 
+      existingRoomsCount < this.MAX_ROOMS_PER_USER && 
+      userBalance >= this.ROOM_CREATION_COST;
+
+    let reason: string | undefined;
+    if (existingRoomsCount >= this.MAX_ROOMS_PER_USER) {
+      reason = 'لديك غرفة بالفعل. لا يمكن إنشاء أكثر من غرفة واحدة.';
+    } else if (userBalance < this.ROOM_CREATION_COST) {
+      reason = `رصيدك غير كافي. تحتاج ${this.ROOM_CREATION_COST.toLocaleString()} نقطة`;
+    }
+
+    return {
+      canCreate,
+      reason,
+      cost: this.ROOM_CREATION_COST,
+      userCoins: userBalance,
+      existingRooms: existingRoomsCount,
+      maxRooms: this.MAX_ROOMS_PER_USER,
     };
   }
 
@@ -113,6 +212,7 @@ export class RoomsService {
       limit = 20,
       search,
       type,
+      category,
       sortBy = "currentMembers",
       sortOrder = "desc",
     } = query;
@@ -131,6 +231,14 @@ export class RoomsService {
 
     if (type) {
       where.type = type;
+    }
+
+    // فلترة حسب التصنيف (category) في settings
+    if (category) {
+      where.settings = {
+        path: ['category'],
+        equals: category.toLowerCase(),
+      };
     }
 
     const [rooms, total] = await Promise.all([

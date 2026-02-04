@@ -35,8 +35,15 @@ import { CurrentUser } from "../auth/decorators/current-user.decorator";
 export class RoomsController {
   constructor(private readonly roomsService: RoomsService) {}
 
+  @Get("can-create")
+  @ApiOperation({ summary: "التحقق من إمكانية إنشاء غرفة" })
+  @ApiResponse({ status: 200, description: "معلومات إمكانية الإنشاء" })
+  async canCreateRoom(@CurrentUser("id") userId: string) {
+    return this.roomsService.canCreateRoom(userId);
+  }
+
   @Post()
-  @ApiOperation({ summary: "إنشاء غرفة جديدة" })
+  @ApiOperation({ summary: "إنشاء غرفة جديدة (300,000 نقطة)" })
   async create(@Body() dto: CreateRoomDto, @CurrentUser("id") userId: string) {
     return this.roomsService.create(dto, userId);
   }
@@ -98,6 +105,18 @@ export class RoomsController {
   @ApiOperation({ summary: "مغادرة غرفة" })
   async leave(@Param("id") id: string, @CurrentUser("id") userId: string) {
     return this.roomsService.leave(id, userId);
+  }
+
+  @Get(":id/members/count")
+  @ApiOperation({ summary: "عدد أعضاء الغرفة النشطين" })
+  async getMembersCount(@Param("id") id: string) {
+    return this.roomsService.getMembersCount(id);
+  }
+
+  @Get(":id/members/active")
+  @ApiOperation({ summary: "الأعضاء النشطين في الغرفة" })
+  async getActiveMembers(@Param("id") id: string) {
+    return this.roomsService.getActiveMembers(id);
   }
 
   @Get(":id/members")

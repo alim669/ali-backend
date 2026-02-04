@@ -129,6 +129,11 @@ export class RoomQueryDto {
   @IsEnum(RoomType)
   type?: RoomType;
 
+  @ApiPropertyOptional({ description: 'Filter by category: chat, music, games, quran, entertainment' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

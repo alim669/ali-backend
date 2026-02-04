@@ -27,6 +27,9 @@ function serializeData(data: any): any {
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
+  
+  // 🔢 Maximum messages per room (FIFO cleanup)
+  private static readonly MAX_MESSAGES_PER_ROOM = 75;
 
   constructor(
     private prisma: PrismaService,
@@ -59,31 +62,40 @@ export class MessagesService {
       });
     }
 
-    const message = await this.prisma.message.create({
-      data: {
-        roomId,
-        senderId: userId,
-        type: dto.type || MessageType.TEXT,
-        content: dto.content,
-        metadata: dto.metadata as any,
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            numericId: true,
-            username: true,
-            displayName: true,
-            avatar: true,
-            verification: {
-              select: {
-                type: true,
-                expiresAt: true,
+    // 🔧 Use transaction to create message + enforce 75 limit
+    const message = await this.prisma.$transaction(async (tx) => {
+      // 1️⃣ Create the message
+      const newMessage = await tx.message.create({
+        data: {
+          roomId,
+          senderId: userId,
+          type: dto.type || MessageType.TEXT,
+          content: dto.content,
+          metadata: dto.metadata as any,
+        },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              numericId: true,
+              username: true,
+              displayName: true,
+              avatar: true,
+              verification: {
+                select: {
+                  type: true,
+                  expiresAt: true,
+                },
               },
             },
           },
         },
-      },
+      });
+      
+      // 2️⃣ Enforce 75 message limit - delete oldest if over limit
+      await this.enforceMessageLimit(tx, roomId);
+      
+      return newMessage;
     });
 
     // Publish to Redis for WebSocket
@@ -96,6 +108,40 @@ export class MessagesService {
     await this.redis.removeTyping(roomId, userId);
 
     return message;
+  }
+  
+  /**
+   * 🔢 Enforce 75 message limit per room (FIFO deletion)
+   * Called inside transaction after message creation
+   */
+  private async enforceMessageLimit(tx: any, roomId: string): Promise<void> {
+    const count = await tx.message.count({
+      where: { roomId, isDeleted: false },
+    });
+    
+    if (count > MessagesService.MAX_MESSAGES_PER_ROOM) {
+      const excess = count - MessagesService.MAX_MESSAGES_PER_ROOM;
+      
+      // Get IDs of oldest messages to delete
+      const oldestMessages = await tx.message.findMany({
+        where: { roomId, isDeleted: false },
+        orderBy: { createdAt: 'asc' },
+        take: excess,
+        select: { id: true },
+      });
+      
+      if (oldestMessages.length > 0) {
+        const idsToDelete = oldestMessages.map((m: { id: string }) => m.id);
+        
+        // Soft delete oldest messages (FIFO)
+        await tx.message.updateMany({
+          where: { id: { in: idsToDelete } },
+          data: { isDeleted: true },
+        });
+        
+        this.logger.debug(`🗑️ [FIFO] Deleted ${excess} oldest messages in room ${roomId} (limit: ${MessagesService.MAX_MESSAGES_PER_ROOM})`);
+      }
+    }
   }
 
   // ================================

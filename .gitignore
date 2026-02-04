@@ -12,9 +12,14 @@ build/
 .env.local
 .env.neon
 .env.production
+.env.production.fixed
 .env.production.server
 .env.*.local
 .env.backup_*
+
+# Firebase - NEVER commit this!
+firebase-service-account.json
+*-service-account.json
 
 # IDE
 .idea/

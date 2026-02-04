@@ -75,6 +75,8 @@ services:
       THROTTLE_TTL: ${THROTTLE_TTL:-60}
       THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+    volumes:
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
     ports:
       - "3000:3000"
     depends_on:

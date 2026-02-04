@@ -27,19 +27,27 @@ export class FriendsService {
       ssl: requireSSL ? { rejectUnauthorized: false } : false,
     });
     
-    // إنشاء Redis للإشعارات الفورية
-    this.redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-      maxRetriesPerRequest: 3,
-    });
+    // إنشاء Redis للإشعارات الفورية (مع معالجة الأخطاء)
+    try {
+      this.redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379'),
+        maxRetriesPerRequest: 3,
+        lazyConnect: true,
+      });
+    } catch (e) {
+      console.warn('Redis not available for FriendsService');
+      this.redis = null;
+    }
     
-    this.initTable();
+    // تأخير initTable لتجنب الأخطاء في بداية التشغيل
+    setTimeout(() => this.initTable().catch(e => console.warn('FriendsService initTable failed:', e.message)), 5000);
   }
 
   private async initTable() {
-    const client = await this.pool.connect();
+    let client;
     try {
+      client = await this.pool.connect();
       // جدول طلبات الصداقة
       await client.query(`
         CREATE TABLE IF NOT EXISTS friend_requests (
@@ -71,10 +79,11 @@ export class FriendsService {
         CREATE INDEX IF NOT EXISTS idx_friendships_user1 ON friendships(user1_id);
         CREATE INDEX IF NOT EXISTS idx_friendships_user2 ON friendships(user2_id);
       `);
+      console.log('✅ Friends tables initialized successfully');
     } catch (error) {
-      console.error("Error initializing friends tables:", error);
+      console.warn("⚠️ FriendsService initTable error (non-fatal):", error.message);
     } finally {
-      client.release();
+      if (client) client.release();
     }
   }
 

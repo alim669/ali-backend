@@ -167,13 +167,23 @@ async function main() {
       sortOrder: 16,
     },
     {
+      id: 'military_plane',
+      name: 'الطائرة العسكرية',
+      description: 'طائرة عسكرية أسطورية VIP',
+      type: GiftType.VIDEO_VIP,
+      imageUrl: '✈️',
+      videoUrl: 'assets/gifts/Military plane.mp4',
+      price: 100000,
+      sortOrder: 17,
+    },
+    {
       id: 'legendary_galaxy',
       name: 'المجرة',
       description: 'مجرة كاملة',
       type: GiftType.VIDEO_VIP,
       imageUrl: '🌌',
       price: 25000,
-      sortOrder: 17,
+      sortOrder: 18,
     },
     {
       id: 'legendary_diamond_throne',
@@ -182,7 +192,7 @@ async function main() {
       type: GiftType.VIDEO_VIP,
       imageUrl: '💎',
       price: 50000,
-      sortOrder: 18,
+      sortOrder: 19,
     },
     {
       id: 'legendary_universe',
@@ -191,7 +201,7 @@ async function main() {
       type: GiftType.VIDEO_VIP,
       imageUrl: '👑',
       price: 100000,
-      sortOrder: 19,
+      sortOrder: 20,
     },
   ];
 

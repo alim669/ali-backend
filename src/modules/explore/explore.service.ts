@@ -150,6 +150,11 @@ export class ExploreService implements OnModuleInit {
       throw new BadRequestException("مدة الفيديو يجب ألا تتجاوز 30 ثانية");
     }
 
+    // 🔧 تحقق: منشورات الفيديو تتطلب mediaUrl
+    if (input.isVideo && (!input.mediaUrl || input.mediaUrl.trim() === '')) {
+      throw new BadRequestException("يجب رفع الفيديو أولاً");
+    }
+
     try {
       const post = await (this.prisma as any).explorePost.create({
         data: {
@@ -452,13 +457,32 @@ export class ExploreService implements OnModuleInit {
     const comments = await (this.prisma as any).exploreComment.findMany({
       where: { postId },
       orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          select: {
+            id: true,
+            displayName: true,
+            handle: true,
+            photoUrl: true,
+            verification: {
+              select: { type: true }
+            }
+          }
+        }
+      }
     });
 
     const data = comments.map((c: any) => ({
       id: c.id,
-      user: c.userName,
+      user: c.user?.displayName || c.userName || 'مستخدم',
+      userName: c.user?.displayName || c.userName || 'مستخدم',
       text: c.text,
       createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : c.createdAt,
+      userId: c.userId,
+      userPhoto: c.user?.photoUrl || null,
+      userHandle: c.user?.handle || null,
+      isVerified: c.user?.verification?.type ? true : false,
+      verificationType: c.user?.verification?.type || null,
     }));
 
     return { success: true, data };
@@ -481,6 +505,19 @@ export class ExploreService implements OnModuleInit {
           userName: input.user,
           text: input.text,
         },
+        include: {
+          user: {
+            select: {
+              id: true,
+              displayName: true,
+              handle: true,
+              photoUrl: true,
+              verification: {
+                select: { type: true }
+              }
+            }
+          }
+        }
       });
 
       // تحديث عدد التعليقات
@@ -493,12 +530,19 @@ export class ExploreService implements OnModuleInit {
         success: true,
         data: {
           id: comment.id,
-          user: comment.userName,
+          user: comment.user?.displayName || comment.userName || 'مستخدم',
+          userName: comment.user?.displayName || comment.userName || 'مستخدم',
           text: comment.text,
           createdAt: comment.createdAt instanceof Date ? comment.createdAt.toISOString() : comment.createdAt,
+          userId: comment.userId,
+          userPhoto: comment.user?.photoUrl || null,
+          userHandle: comment.user?.handle || null,
+          isVerified: comment.user?.verification?.type ? true : false,
+          verificationType: comment.user?.verification?.type || null,
         },
       };
     } catch (error) {
+      this.logger.error(`❌ فشل إضافة التعليق: ${error}`);
       return { success: false, error: "FAILED" };
     }
   }

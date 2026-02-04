@@ -684,15 +684,42 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ================================
-  // Room Online Members
+  // Room Online Members (with atomic operations)
   // ================================
 
-  async addUserToRoom(roomId: string, userId: string): Promise<void> {
-    await this.sadd(`room:${roomId}:online`, userId);
+  /**
+   * Add user to room - returns true if user was newly added (SADD returns 1)
+   */
+  async addUserToRoom(roomId: string, userId: string): Promise<boolean> {
+    if (!this.isEnabled()) {
+      const key = `room:${roomId}:online`;
+      const entry = this.memoryCache.get(key);
+      const set = entry ? new Set(JSON.parse(entry.value)) : new Set<string>();
+      const wasNew = !set.has(userId);
+      set.add(userId);
+      this.memoryCache.set(key, { value: JSON.stringify([...set]) });
+      return wasNew;
+    }
+    const result = await this.client!.sadd(`room:${roomId}:online`, userId);
+    return result === 1;
   }
 
-  async removeUserFromRoom(roomId: string, userId: string): Promise<void> {
-    await this.srem(`room:${roomId}:online`, userId);
+  /**
+   * Remove user from room - returns true if user was actually removed
+   */
+  async removeUserFromRoom(roomId: string, userId: string): Promise<boolean> {
+    if (!this.isEnabled()) {
+      const key = `room:${roomId}:online`;
+      const entry = this.memoryCache.get(key);
+      if (!entry) return false;
+      const set = new Set(JSON.parse(entry.value));
+      const wasPresent = set.has(userId);
+      set.delete(userId);
+      this.memoryCache.set(key, { value: JSON.stringify([...set]) });
+      return wasPresent;
+    }
+    const result = await this.client!.srem(`room:${roomId}:online`, userId);
+    return result === 1;
   }
 
   async getRoomOnlineUsers(roomId: string): Promise<string[]> {
@@ -701,5 +728,301 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async getRoomOnlineCount(roomId: string): Promise<number> {
     return this.scard(`room:${roomId}:online`);
+  }
+
+  // ================================
+  // 🔌 User Socket Tracking (multi-connection)
+  // ================================
+
+  /**
+   * Add socket to user's room connections - returns socket count after add
+   */
+  async addUserSocketToRoom(roomId: string, userId: string, socketId: string): Promise<number> {
+    const key = `room:${roomId}:sockets:${userId}`;
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      const set = entry ? new Set(JSON.parse(entry.value)) : new Set<string>();
+      set.add(socketId);
+      this.memoryCache.set(key, { value: JSON.stringify([...set]) });
+      return set.size;
+    }
+    await this.client!.sadd(key, socketId);
+    await this.client!.expire(key, 3600); // 1 hour TTL
+    return await this.client!.scard(key);
+  }
+
+  /**
+   * Remove socket from user's room connections - returns remaining socket count
+   */
+  async removeUserSocketFromRoom(roomId: string, userId: string, socketId: string): Promise<number> {
+    const key = `room:${roomId}:sockets:${userId}`;
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      if (!entry) return 0;
+      const set = new Set(JSON.parse(entry.value));
+      set.delete(socketId);
+      if (set.size === 0) {
+        this.memoryCache.delete(key);
+      } else {
+        this.memoryCache.set(key, { value: JSON.stringify([...set]) });
+      }
+      return set.size;
+    }
+    await this.client!.srem(key, socketId);
+    return await this.client!.scard(key);
+  }
+
+  /**
+   * Get user's socket count in a room
+   */
+  async getUserSocketCountInRoom(roomId: string, userId: string): Promise<number> {
+    const key = `room:${roomId}:sockets:${userId}`;
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      if (!entry) return 0;
+      return new Set(JSON.parse(entry.value)).size;
+    }
+    return await this.client!.scard(key);
+  }
+
+  /**
+   * Clear all sockets for user in room
+   */
+  async clearUserSocketsInRoom(roomId: string, userId: string): Promise<void> {
+    const key = `room:${roomId}:sockets:${userId}`;
+    await this.del(key);
+  }
+
+  // ================================
+  // 📦 User Info Cache (reduce DB lookups)
+  // ================================
+
+  /**
+   * Cache user public info for fast lookups
+   */
+  async cacheUserPublicInfo(userId: string, info: {
+    name: string;
+    avatar?: string;
+    numericId?: string;
+  }): Promise<void> {
+    const key = `user:${userId}:public`;
+    const data = JSON.stringify(info);
+    await this.set(key, data, 1800); // 30 min TTL
+  }
+
+  /**
+   * Get cached user public info
+   */
+  async getCachedUserPublicInfo(userId: string): Promise<{
+    name: string;
+    avatar?: string;
+    numericId?: string;
+  } | null> {
+    const key = `user:${userId}:public`;
+    const data = await this.get(key);
+    if (!data) return null;
+    try {
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Batch get cached user info
+   */
+  async batchGetCachedUserInfo(userIds: string[]): Promise<Map<string, { name: string; avatar?: string; numericId?: string }>> {
+    const result = new Map<string, { name: string; avatar?: string; numericId?: string }>();
+    if (!this.isEnabled() || userIds.length === 0) return result;
+    
+    const keys = userIds.map(id => `user:${id}:public`);
+    const values = await this.client!.mget(...keys);
+    
+    for (let i = 0; i < userIds.length; i++) {
+      const val = values[i];
+      if (val) {
+        try {
+          result.set(userIds[i], JSON.parse(val));
+        } catch {}
+      }
+    }
+    return result;
+  }
+
+  // ================================
+  // 🔒 DISTRIBUTED LOCKS (for join dedup)
+  // ================================
+
+  /**
+   * Acquire a lock with NX (only if not exists)
+   * Returns true if lock acquired, false if already held
+   */
+  async acquireLock(key: string, ttlSeconds: number = 10): Promise<boolean> {
+    if (!this.isEnabled()) {
+      // In-memory lock
+      const entry = this.memoryCache.get(key);
+      if (entry && (!entry.expiresAt || Date.now() < entry.expiresAt)) {
+        return false; // Lock already held
+      }
+      this.memoryCache.set(key, { value: '1', expiresAt: Date.now() + ttlSeconds * 1000 });
+      return true;
+    }
+    const result = await this.client!.set(key, Date.now().toString(), 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
+  /**
+   * Release a lock
+   */
+  async releaseLock(key: string): Promise<void> {
+    await this.del(key);
+  }
+
+  // ================================
+  // ⏰ GRACE PERIOD (for reconnects)
+  // ================================
+
+  /**
+   * Set a grace period marker for user leaving a room
+   * If user rejoins within grace period, don't emit user_left
+   */
+  async setLeaveGrace(roomId: string, userId: string, graceMs: number = 10000): Promise<void> {
+    const key = `room:${roomId}:grace:${userId}`;
+    const graceSeconds = Math.ceil(graceMs / 1000);
+    await this.set(key, Date.now().toString(), graceSeconds);
+  }
+
+  /**
+   * Check if user is in grace period
+   */
+  async isInGracePeriod(roomId: string, userId: string): Promise<boolean> {
+    const key = `room:${roomId}:grace:${userId}`;
+    return await this.exists(key);
+  }
+
+  /**
+   * Clear grace period (user rejoined)
+   */
+  async clearGracePeriod(roomId: string, userId: string): Promise<void> {
+    const key = `room:${roomId}:grace:${userId}`;
+    await this.del(key);
+  }
+
+  // ================================
+  // 🚫 BAN CACHE
+  // ================================
+
+  /**
+   * Cache a ban in Redis for fast lookups
+   */
+  async cacheBan(roomId: string, userId: string, banInfo: {
+    bannedBy: string;
+    reason?: string;
+    bannedAt: number;
+    expiresAt?: number;
+  }): Promise<void> {
+    const key = `room:${roomId}:bans`;
+    await this.hset(key, userId, JSON.stringify(banInfo));
+    // Set TTL on the hash key if needed (for temp bans)
+    if (banInfo.expiresAt) {
+      const ttl = Math.ceil((banInfo.expiresAt - Date.now()) / 1000);
+      if (ttl > 0 && this.isEnabled()) {
+        await this.client!.expire(key, ttl + 60); // Extra 60s buffer
+      }
+    }
+  }
+
+  /**
+   * Check if user is banned (from cache)
+   */
+  async isBanned(roomId: string, userId: string): Promise<{banned: boolean; banInfo?: any}> {
+    const key = `room:${roomId}:bans`;
+    const banData = await this.hget(key, userId);
+    if (!banData) return { banned: false };
+
+    try {
+      const banInfo = JSON.parse(banData);
+      // Check if expired
+      if (banInfo.expiresAt && banInfo.expiresAt < Date.now()) {
+        await this.hdel(key, userId);
+        return { banned: false };
+      }
+      return { banned: true, banInfo };
+    } catch {
+      return { banned: false };
+    }
+  }
+
+  /**
+   * Remove ban from cache
+   */
+  async removeBanCache(roomId: string, userId: string): Promise<void> {
+    const key = `room:${roomId}:bans`;
+    await this.hdel(key, userId);
+  }
+
+  // ================================
+  // 🎁 GIFT IDEMPOTENCY
+  // ================================
+
+  /**
+   * Check and set gift transaction (prevents double broadcast)
+   * Returns true if this is the first time seeing this transaction
+   */
+  async checkGiftIdempotency(giftTxId: string): Promise<boolean> {
+    const key = `gift:tx:${giftTxId}`;
+    // Try to acquire lock - only first one wins
+    return await this.acquireLock(key, 300); // 5 min TTL
+  }
+
+  /**
+   * Mark gift as processed with result
+   */
+  async markGiftProcessed(giftTxId: string, resultId: string): Promise<void> {
+    const key = `gift:tx:${giftTxId}`;
+    await this.set(key, resultId, 300);
+  }
+
+  // ================================
+  // 📊 PRESENCE SNAPSHOT
+  // ================================
+
+  /**
+   * Get detailed room presence with member info
+   */
+  async getRoomPresenceSnapshot(roomId: string): Promise<{
+    memberIds: string[];
+    onlineCount: number;
+    version: number;
+  }> {
+    const memberIds = await this.getRoomOnlineUsers(roomId);
+    const versionKey = `room:${roomId}:presence_version`;
+    let version = 1;
+    
+    if (this.isEnabled()) {
+      const versionStr = await this.client!.get(versionKey);
+      version = versionStr ? parseInt(versionStr) : 1;
+    }
+
+    return {
+      memberIds,
+      onlineCount: memberIds.length,
+      version,
+    };
+  }
+
+  /**
+   * Increment presence version (for delta sync)
+   */
+  async incrementPresenceVersion(roomId: string): Promise<number> {
+    const key = `room:${roomId}:presence_version`;
+    if (!this.isEnabled()) {
+      const entry = this.memoryCache.get(key);
+      const current = entry ? parseInt(entry.value) : 0;
+      const newVersion = current + 1;
+      this.memoryCache.set(key, { value: newVersion.toString() });
+      return newVersion;
+    }
+    return await this.client!.incr(key);
   }
 }

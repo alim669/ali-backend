@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl"]
 }
 
 datasource db {
@@ -9,70 +10,64 @@ datasource db {
 }
 
 model User {
-  id                                                 String            @id @default(uuid())
-  numericId                                          BigInt            @unique @default(autoincrement())
-  customId                                           String?           @unique
-  email                                              String            @unique
+  id                                                 String             @id @default(uuid())
+  numericId                                          BigInt             @unique @default(autoincrement())
+  email                                              String             @unique
   passwordHash                                       String?
-  googleId                                           String?           @unique
-  authProvider                                       AuthProvider      @default(EMAIL)
-  username                                           String            @unique
+  googleId                                           String?            @unique
+  authProvider                                       AuthProvider       @default(EMAIL)
+  username                                           String             @unique
   displayName                                        String
   avatar                                             String?
   bio                                                String?
-  role                                               UserRole          @default(USER)
-  status                                             UserStatus        @default(ACTIVE)
-  isVIP                                              Boolean           @default(false)
+  role                                               UserRole           @default(USER)
+  status                                             UserStatus         @default(ACTIVE)
+  isVIP                                              Boolean            @default(false)
   vipExpiresAt                                       DateTime?
-  emailVerified                                      Boolean           @default(false)
+  emailVerified                                      Boolean            @default(false)
   lastLoginAt                                        DateTime?
   lastLoginIp                                        String?
-  // Ban fields
+  createdAt                                          DateTime           @default(now())
+  updatedAt                                          DateTime           @updatedAt
   banReason                                          String?
   bannedAt                                           DateTime?
-  bannedUntil                                        DateTime?
   bannedBy                                           String?
-  createdAt                                          DateTime          @default(now())
-  updatedAt                                          DateTime          @updatedAt
-  adminActions                                       AdminAction[]     @relation("AdminActor")
-  actionsReceived                                    AdminAction[]     @relation("AdminTarget")
-  following                                          Follow[]          @relation("Follower")
-  followers                                          Follow[]          @relation("Following")
-  giftsReceived                                      GiftSend[]        @relation("GiftReceiver")
-  giftsSent                                          GiftSend[]        @relation("GiftSender")
-  sentMessages                                       Message[]         @relation("MessageSender")
-  notifications                                      Notification[]
-  refreshTokens                                      RefreshToken[]
-  reportsReceived                                    Report[]          @relation("ReportedUser")
-  reportsMade                                        Report[]          @relation("Reporter")
-  reportsResolved                                    Report[]          @relation("ReportResolver")
-  ownedRooms                                         Room[]            @relation("RoomOwner")
-  roomMemberships                                    RoomMember[]
-  wallet                                             Wallet?
-  friend_requests_friend_requests_from_user_idToUser friend_requests[] @relation("friend_requests_from_user_idToUser")
-  friend_requests_friend_requests_to_user_idToUser   friend_requests[] @relation("friend_requests_to_user_idToUser")
-  friendships_friendships_user1_idToUser             friendships[]     @relation("friendships_user1_idToUser")
-  friendships_friendships_user2_idToUser             friendships[]     @relation("friendships_user2_idToUser")
-  // Private Messages
-  sentPrivateMessages                                PrivateMessage[]  @relation("PrivateMessageSender")
-  receivedPrivateMessages                            PrivateMessage[]  @relation("PrivateMessageReceiver")
-  // Block System
-  blockedUsers                                       UserBlock[]       @relation("Blocker")
-  blockedByUsers                                     UserBlock[]       @relation("Blocked")
-  // Device Tokens
-  deviceTokens                                       DeviceToken[]
-  // Agent Relations
-  agentRequests                                      AgentRequest[]
+  bannedUntil                                        DateTime?
+  customId                                           String?            @unique
+  adminActions                                       AdminAction[]      @relation("AdminActor")
+  actionsReceived                                    AdminAction[]      @relation("AdminTarget")
   agent                                              Agent?
-  // Verification Badge
-  verification                                       Verification?
-  // Explore Posts
-  explorePosts                                       ExplorePost[]
-  // Mute System
-  mutesReceived                                      UserMute[]        @relation("MutedUser")
-  mutesApplied                                       UserMute[]        @relation("MutedBy")
-  // Appeals
+  agentRequests                                      AgentRequest[]
   appeals                                            Appeal[]
+  deviceTokens                                       DeviceToken[]
+  explorePosts                                       ExplorePost[]
+  following                                          Follow[]           @relation("Follower")
+  followers                                          Follow[]           @relation("Following")
+  giftsReceived                                      GiftSend[]         @relation("GiftReceiver")
+  giftsSent                                          GiftSend[]         @relation("GiftSender")
+  sentMessages                                       Message[]          @relation("MessageSender")
+  notifications                                      Notification[]
+  receivedPrivateMessages                            PrivateMessage[]   @relation("PrivateMessageReceiver")
+  sentPrivateMessages                                PrivateMessage[]   @relation("PrivateMessageSender")
+  refreshTokens                                      RefreshToken[]
+  reportsReceived                                    Report[]           @relation("ReportedUser")
+  reportsMade                                        Report[]           @relation("Reporter")
+  reportsResolved                                    Report[]           @relation("ReportResolver")
+  ownedRooms                                         Room[]             @relation("RoomOwner")
+  roomMemberships                                    RoomMember[]
+  blockedByUsers                                     UserBlock[]        @relation("Blocked")
+  blockedUsers                                       UserBlock[]        @relation("Blocker")
+  mutesApplied                                       UserMute[]         @relation("MutedBy")
+  mutesReceived                                      UserMute[]         @relation("MutedUser")
+  verification                                       Verification?
+  wallet                                             Wallet?
+  friend_requests_friend_requests_from_user_idToUser friend_requests[]  @relation("friend_requests_from_user_idToUser")
+  friend_requests_friend_requests_to_user_idToUser   friend_requests[]  @relation("friend_requests_to_user_idToUser")
+  friendships_friendships_user1_idToUser             friendships[]      @relation("friendships_user1_idToUser")
+  friendships_friendships_user2_idToUser             friendships[]      @relation("friendships_user2_idToUser")
+  private_chats_private_chats_user1_idToUser         private_chats[]    @relation("private_chats_user1_idToUser")
+  private_chats_private_chats_user2_idToUser         private_chats[]    @relation("private_chats_user2_idToUser")
+  private_messages                                   private_messages[]
 
   @@index([email])
   @@index([googleId])
@@ -113,9 +108,9 @@ model Room {
   currentMembers      Int          @default(0)
   isPasswordProtected Boolean      @default(false)
   passwordHash        String?
-  settings            Json?        // إعدادات الغرفة (isVip, vipExpiresAt, etc.)
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
+  settings            Json?
   giftsSent           GiftSend[]
   messages            Message[]
   reports             Report[]
@@ -352,7 +347,6 @@ model AgentRequest {
   region          String
   email           String
   phone           String
-  telegram        String?
   message         String?
   status          AgentRequestStatus @default(PENDING)
   reviewedBy      String?
@@ -361,6 +355,7 @@ model AgentRequest {
   expiresAt       DateTime           @default(dbgenerated("(now() + '7 days'::interval)"))
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+  telegram        String?
   user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -377,10 +372,10 @@ model Agent {
   province  String
   region    String
   phone     String
-  telegram  String?
   status    AgentStatus @default(ACTIVE)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+  telegram  String?
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([status])
@@ -414,6 +409,242 @@ model friendships {
   @@unique([user1_id, user2_id])
   @@index([user1_id], map: "idx_friendships_user1")
   @@index([user2_id], map: "idx_friendships_user2")
+}
+
+model PrivateMessage {
+  id          String               @id @default(uuid())
+  senderId    String
+  receiverId  String
+  type        PrivateMessageType   @default(TEXT)
+  content     String
+  metadata    Json?
+  status      PrivateMessageStatus @default(SENT)
+  isDeleted   Boolean              @default(false)
+  deletedAt   DateTime?
+  deletedBy   String?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  receiver    User                 @relation("PrivateMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender      User                 @relation("PrivateMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([senderId, receiverId])
+  @@index([receiverId, status])
+  @@index([createdAt])
+}
+
+model UserBlock {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  reason    String?
+  createdAt DateTime @default(now())
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model UserMute {
+  id        String    @id @default(uuid())
+  userId    String
+  mutedById String
+  reason    String?
+  scope     String    @default("GLOBAL")
+  roomId    String?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  mutedBy   User      @relation("MutedBy", fields: [mutedById], references: [id], onDelete: Cascade)
+  room      Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User      @relation("MutedUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([mutedById])
+  @@index([roomId])
+  @@index([expiresAt])
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  Platform @default(ANDROID)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([userId, isActive])
+}
+
+model Verification {
+  id        String           @id @default(uuid())
+  userId    String           @unique
+  type      VerificationType
+  price     Int              @default(0)
+  expiresAt DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([expiresAt])
+}
+
+model ExplorePost {
+  id            String            @id @default(uuid())
+  userId        String
+  userName      String
+  userHandle    String
+  caption       String
+  tags          String[]
+  country       String            @default("IQ")
+  locale        String            @default("ar")
+  durationSec   Int?
+  aspectRatio   Float?
+  thumbnailUrl  String?
+  mediaUrl      String?
+  isReel        Boolean           @default(false)
+  isVideo       Boolean           @default(false)
+  views         Int               @default(0)
+  shares        Int               @default(0)
+  lovesCount    Int               @default(0)
+  firesCount    Int               @default(0)
+  wowsCount     Int               @default(0)
+  commentsCount Int               @default(0)
+  isFeatured    Boolean           @default(false)
+  isHidden      Boolean           @default(false)
+  visibility    ExploreVisibility @default(PUBLIC)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  bookmarks     ExploreBookmark[]
+  comments      ExploreComment[]
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isHidden])
+  @@index([visibility])
+  @@index([isReel])
+  @@index([isFeatured])
+  @@index([createdAt])
+  @@index([views])
+}
+
+model ExploreComment {
+  id        String      @id @default(uuid())
+  postId    String
+  userId    String
+  userName  String
+  text      String
+  createdAt DateTime    @default(now())
+  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([createdAt])
+}
+
+model ExploreBookmark {
+  id        String      @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime    @default(now())
+  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
+
+model NameIcon {
+  id           String         @id @default(uuid())
+  name         String         @unique
+  displayName  String
+  assetPath    String
+  price        Int            @default(80000)
+  durationDays Int            @default(30)
+  isActive     Boolean        @default(true)
+  sortOrder    Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  userIcons    UserNameIcon[]
+
+  @@index([isActive])
+  @@index([sortOrder])
+}
+
+model UserNameIcon {
+  id        String   @id @default(uuid())
+  userId    String
+  iconId    String
+  expiresAt DateTime
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  icon      NameIcon @relation(fields: [iconId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, iconId])
+  @@index([userId])
+  @@index([iconId])
+  @@index([expiresAt])
+  @@index([isActive])
+}
+
+model Appeal {
+  id         String       @id @default(uuid())
+  userId     String
+  type       AppealType   @default(BAN_APPEAL)
+  reason     String
+  status     AppealStatus @default(PENDING)
+  response   String?
+  reviewedBy String?
+  reviewedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model private_chats {
+  id                                String             @id @db.VarChar(255)
+  user1_id                          String
+  user2_id                          String
+  last_message_at                   DateTime?          @db.Timestamp(6)
+  created_at                        DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at                        DateTime?          @default(now()) @db.Timestamp(6)
+  User_private_chats_user1_idToUser User               @relation("private_chats_user1_idToUser", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User_private_chats_user2_idToUser User               @relation("private_chats_user2_idToUser", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  private_messages                  private_messages[]
+
+  @@index([user1_id, user2_id], map: "idx_private_chats_users")
+}
+
+model private_messages {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  chat_id       String        @db.VarChar(255)
+  sender_id     String
+  text          String
+  type          String?       @default("text") @db.VarChar(20)
+  image_url     String?
+  duration      String?       @db.VarChar(20)
+  is_read       Boolean?      @default(false)
+  created_at    DateTime?     @default(now()) @db.Timestamp(6)
+  private_chats private_chats @relation(fields: [chat_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User          User          @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([chat_id], map: "idx_private_messages_chat_id")
+  @@index([created_at(sort: Desc)], map: "idx_private_messages_created_at")
 }
 
 enum UserRole {
@@ -491,26 +722,26 @@ enum AdminActionType {
   USER_BANNED
   USER_SUSPENDED
   USER_UNBANNED
+  ROOM_CLOSED
+  ROOM_SUSPENDED
+  GIFT_CREATED
+  GIFT_UPDATED
+  WALLET_ADJUSTED
+  SETTINGS_CHANGED
+  VERIFICATION_GRANTED
+  VERIFICATION_REVOKED
   USER_WARNING
   USER_MUTED
   USER_SHADOW_BANNED
   USER_IP_BANNED
   USER_FROZEN
-  ROOM_CLOSED
-  ROOM_SUSPENDED
   ROOM_DELETED
   ROOM_OWNERSHIP_TRANSFERRED
-  GIFT_CREATED
-  GIFT_UPDATED
   GIFT_REVERSED
-  WALLET_ADJUSTED
-  SETTINGS_CHANGED
   SETTING_CHANGED
   ROLE_CHANGED
   FORCE_LOGOUT
   FORCE_LOGOUT_ALL
-  VERIFICATION_GRANTED
-  VERIFICATION_REVOKED
 }
 
 enum NotificationType {
@@ -556,35 +787,6 @@ enum AgentStatus {
   SUSPENDED
 }
 
-// ================================
-// Private Messaging System
-// ================================
-
-model PrivateMessage {
-  id          String               @id @default(uuid())
-  senderId    String
-  receiverId  String
-  type        PrivateMessageType   @default(TEXT)
-  content     String
-  metadata    Json?
-  status      PrivateMessageStatus @default(SENT)
-  isDeleted   Boolean              @default(false)
-  deletedAt   DateTime?
-  deletedBy   String?
-  deliveredAt DateTime?
-  readAt      DateTime?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  sender      User                 @relation("PrivateMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver    User                 @relation("PrivateMessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
-
-  @@index([senderId])
-  @@index([receiverId])
-  @@index([senderId, receiverId])
-  @@index([receiverId, status])
-  @@index([createdAt])
-}
-
 enum PrivateMessageType {
   TEXT
   IMAGE
@@ -601,89 +803,10 @@ enum PrivateMessageStatus {
   FAILED
 }
 
-// ================================
-// User Block System
-// ================================
-
-model UserBlock {
-  id        String   @id @default(uuid())
-  blockerId String
-  blockedId String
-  reason    String?
-  createdAt DateTime @default(now())
-  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
-  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
-
-  @@unique([blockerId, blockedId])
-  @@index([blockerId])
-  @@index([blockedId])
-}
-
-// ================================
-// User Mute System (Global & Room Mutes)
-// ================================
-
-model UserMute {
-  id        String   @id @default(uuid())
-  userId    String
-  mutedById String
-  reason    String?
-  scope     String   @default("GLOBAL") // GLOBAL, ROOM
-  roomId    String?
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
-  user      User     @relation("MutedUser", fields: [userId], references: [id], onDelete: Cascade)
-  mutedBy   User     @relation("MutedBy", fields: [mutedById], references: [id], onDelete: Cascade)
-  room      Room?    @relation(fields: [roomId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([mutedById])
-  @@index([roomId])
-  @@index([expiresAt])
-}
-
-// ================================
-// Device Tokens for Push Notifications
-// ================================
-
-model DeviceToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  platform  Platform @default(ANDROID)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([token])
-  @@index([userId, isActive])
-}
-
 enum Platform {
   ANDROID
   IOS
   WEB
-}
-
-// ================================
-// Verification Badges System
-// ================================
-
-model Verification {
-  id        String           @id @default(uuid())
-  userId    String           @unique
-  type      VerificationType
-  price     Int              @default(0)
-  expiresAt DateTime
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([type])
-  @@index([expiresAt])
 }
 
 enum VerificationType {
@@ -691,78 +814,10 @@ enum VerificationType {
   GOLD
   PURPLE
   DIAMOND
-  VIP        // توثيق VIP متحرك
-  VERIFIED   // توثيق رسمي مثل فيسبوك - أزرق كلاسيكي
-  OFFICIAL   // حساب رسمي للمؤسسات
-  CELEBRITY  // توثيق المشاهير
-}
-
-// ================================
-// Explore Posts (Reels) System
-// ================================
-
-model ExplorePost {
-  id            String              @id @default(uuid())
-  userId        String
-  userName      String
-  userHandle    String
-  caption       String
-  tags          String[]
-  country       String              @default("IQ")
-  locale        String              @default("ar")
-  durationSec   Int?
-  aspectRatio   Float?
-  thumbnailUrl  String?
-  mediaUrl      String?
-  isReel        Boolean             @default(false)
-  isVideo       Boolean             @default(false)
-  views         Int                 @default(0)
-  shares        Int                 @default(0)
-  lovesCount    Int                 @default(0)
-  firesCount    Int                 @default(0)
-  wowsCount     Int                 @default(0)
-  commentsCount Int                 @default(0)
-  isFeatured    Boolean             @default(false)
-  isHidden      Boolean             @default(false)
-  visibility    ExploreVisibility   @default(PUBLIC)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comments      ExploreComment[]
-  bookmarks     ExploreBookmark[]
-
-  @@index([userId])
-  @@index([isHidden])
-  @@index([visibility])
-  @@index([isReel])
-  @@index([isFeatured])
-  @@index([createdAt])
-  @@index([views])
-}
-
-model ExploreComment {
-  id        String      @id @default(uuid())
-  postId    String
-  userId    String
-  userName  String
-  text      String
-  createdAt DateTime    @default(now())
-  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@index([postId])
-  @@index([createdAt])
-}
-
-model ExploreBookmark {
-  id        String      @id @default(uuid())
-  userId    String
-  postId    String
-  createdAt DateTime    @default(now())
-  post      ExplorePost @relation(fields: [postId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, postId])
-  @@index([userId])
-  @@index([postId])
+  VIP
+  VERIFIED
+  OFFICIAL
+  CELEBRITY
 }
 
 enum ExploreVisibility {
@@ -771,77 +826,16 @@ enum ExploreVisibility {
   PRIVATE
 }
 
-// ================================
-// Name Icons System (أيقونات بجانب الاسم)
-// ================================
-
-model NameIcon {
-  id          String   @id @default(uuid())
-  name        String   @unique // crown, fire, diamond, etc.
-  displayName String   // التاج الملكي
-  assetPath   String   // assets/name_icons/crown.gif
-  price       Int      @default(80000)
-  durationDays Int     @default(30) // مدة الصلاحية بالأيام
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  userIcons   UserNameIcon[]
-  
-  @@index([isActive])
-  @@index([sortOrder])
-}
-
-model UserNameIcon {
-  id         String   @id @default(uuid())
-  userId     String
-  iconId     String
-  expiresAt  DateTime
-  isActive   Boolean  @default(true) // هل مفعلة حالياً
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  
-  icon       NameIcon @relation(fields: [iconId], references: [id], onDelete: Cascade)
-  
-  @@unique([userId, iconId])
-  @@index([userId])
-  @@index([iconId])
-  @@index([expiresAt])
-  @@index([isActive])
-}
-
-// نظام الطعون/الاستئناف
-model Appeal {
-  id           String       @id @default(uuid())
-  userId       String
-  type         AppealType   @default(BAN_APPEAL)
-  reason       String       // سبب الطعن من المستخدم
-  status       AppealStatus @default(PENDING)
-  response     String?      // رد المشرف
-  reviewedBy   String?      // ID المشرف الذي راجعه
-  reviewedAt   DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@index([userId])
-  @@index([status])
-  @@index([type])
-  @@index([createdAt])
-}
-
 enum AppealType {
-  BAN_APPEAL       // طعن على الحظر
-  MUTE_APPEAL      // طعن على الكتم
-  WARNING_APPEAL   // طعن على التحذير
-  OTHER            // أخرى
+  BAN_APPEAL
+  MUTE_APPEAL
+  WARNING_APPEAL
+  OTHER
 }
 
 enum AppealStatus {
-  PENDING          // قيد المراجعة
-  APPROVED         // تمت الموافقة
-  REJECTED         // مرفوض
-  IN_REVIEW        // جاري المراجعة
+  PENDING
+  APPROVED
+  REJECTED
+  IN_REVIEW
 }

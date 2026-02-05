@@ -43,6 +43,22 @@ export class FriendsService {
     // تأخير initTable لتجنب الأخطاء في بداية التشغيل
     setTimeout(() => this.initTable().catch(e => console.warn('FriendsService initTable failed:', e.message)), 5000);
   }
+  
+  /**
+   * Helper لإرسال رسالة عبر Redis بأمان
+   */
+  private async safeRedisPublish(channel: string, message: string): Promise<void> {
+    if (!this.redis) {
+      console.warn('Redis not available, skipping publish to:', channel);
+      return;
+    }
+    try {
+      await this.redis.publish(channel, message);
+      console.log(`📤 Redis publish to ${channel} successful`);
+    } catch (e) {
+      console.warn(`Redis publish failed for ${channel}:`, e.message);
+    }
+  }
 
   private async initTable() {
     let client;
@@ -199,7 +215,7 @@ export class FriendsService {
         );
         console.log(`📝 Friend request notification created in DB for user ${toUserId}`);
         
-        await this.redis.publish('friend:request:new', JSON.stringify({
+        await this.safeRedisPublish('friend:request:new', JSON.stringify({
           requestId: result.rows[0].id,
           fromUserId: fromUserId,
           toUserId: toUserId,
@@ -207,7 +223,6 @@ export class FriendsService {
           fromUserAvatar: sender.avatar,
           fromUserCustomId: sender.numericId,
         }));
-        console.log(`📤 Friend request notification sent to Redis for user ${toUserId}`);
       }
 
       console.log(`✅ Friend request created successfully`);
@@ -309,12 +324,11 @@ export class FriendsService {
       await client.query("COMMIT");
       
       // إرسال إشعار فوري عبر Redis
-      await this.redis.publish('friend:request:accepted', JSON.stringify({
+      await this.safeRedisPublish('friend:request:accepted', JSON.stringify({
         fromUserId: userId,
         toUserId: request.from_user_id,
         fromUserName: request.accepter_name,
       }));
-      console.log(`📤 Friend accepted notification sent to Redis for user ${request.from_user_id}`);
 
       return {
         success: true,
@@ -362,8 +376,12 @@ export class FriendsService {
    * جلب قائمة الأصدقاء
    */
   async getFriends(userId: string) {
-    const client = await this.pool.connect();
+    console.log(`📋 getFriends: userId=${userId}`);
+    let client;
     try {
+      client = await this.pool.connect();
+      console.log(`📋 getFriends: connected to database`);
+      
       const result = await client.query(
         `
         SELECT 
@@ -376,25 +394,42 @@ export class FriendsService {
           u."displayName" as name,
           u.avatar,
           u."numericId" as custom_id,
-          u.status = 'ACTIVE' as is_online,
-          f.created_at
+          (u.status::text = 'ACTIVE') as is_online,
+          f.created_at,
+          v.type as verification_type
         FROM friendships f
         JOIN "User" u ON u.id = CASE 
           WHEN f.user1_id = $1 THEN f.user2_id 
           ELSE f.user1_id 
         END
+        LEFT JOIN "Verification" v ON v."userId" = u.id AND v.status = 'APPROVED'
         WHERE f.user1_id = $1 OR f.user2_id = $1
         ORDER BY u."displayName"
       `,
         [userId],
       );
+      
+      console.log(`📋 getFriends: found ${result.rows.length} friends`);
 
       return {
         success: true,
-        data: result.rows,
+        data: result.rows.map((row: any) => ({
+          friendship_id: row.friendship_id,
+          friend_id: row.friend_id,
+          username: row.username,
+          name: row.name,
+          avatar: row.avatar,
+          custom_id: row.custom_id,
+          is_online: row.is_online,
+          created_at: row.created_at,
+          verificationType: row.verification_type,
+        })),
       };
+    } catch (error) {
+      console.error(`❌ getFriends error:`, error);
+      throw error;
     } finally {
-      client.release();
+      if (client) client.release();
     }
   }
 
@@ -402,8 +437,10 @@ export class FriendsService {
    * جلب طلبات الصداقة المعلقة (الواردة)
    */
   async getPendingRequests(userId: string) {
-    const client = await this.pool.connect();
+    console.log(`📋 getPendingRequests: userId=${userId}`);
+    let client;
     try {
+      client = await this.pool.connect();
       const result = await client.query(
         `
         SELECT 
@@ -413,15 +450,18 @@ export class FriendsService {
           u.username,
           u."displayName" as display_name,
           u.avatar as photo_url,
-          u."numericId" as custom_id
+          u."numericId" as custom_id,
+          v.type as verification_type
         FROM friend_requests fr
         JOIN "User" u ON u.id = fr.from_user_id
+        LEFT JOIN "Verification" v ON v."userId" = u.id AND v.status = 'APPROVED'
         WHERE fr.to_user_id = $1 AND fr.status = 'pending'
         ORDER BY fr.created_at DESC
       `,
         [userId],
       );
 
+      console.log(`📋 getPendingRequests: found ${result.rows.length} requests`);
       return {
         success: true,
         data: result.rows.map((row: any) => ({
@@ -431,10 +471,14 @@ export class FriendsService {
           photoUrl: row.photo_url,
           customId: row.custom_id,
           createdAt: row.created_at,
+          verificationType: row.verification_type,
         })),
       };
+    } catch (error) {
+      console.error(`❌ getPendingRequests error:`, error);
+      throw error;
     } finally {
-      client.release();
+      if (client) client.release();
     }
   }
 

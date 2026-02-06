@@ -513,6 +513,40 @@ export class GiftsService {
           createdAt: new Date().toISOString(),
         }
       );
+      
+      // 🌟 بث عالمي للهدايا الأسطورية (VIDEO_VIP) لكل المستخدمين المتصلين
+      if (result.gift.type === 'VIDEO_VIP') {
+        this.logger.log(`🌟 Broadcasting LEGENDARY gift globally: ${result.gift.name}`);
+        
+        // الحصول على اسم الغرفة
+        const room = await this.prisma.room.findUnique({
+          where: { id: dto.roomId },
+          select: { name: true },
+        });
+        
+        // بث الهدية لكل المستخدمين
+        this.appGateway.server.emit('global_legendary_gift', {
+          id: result.giftSend.id,
+          roomId: dto.roomId,
+          roomName: room?.name || 'غرفة',
+          senderId,
+          senderName: sender.displayName,
+          senderAvatar: sender.avatar,
+          receiverId: dto.receiverId,
+          receiverName: receiver.displayName,
+          receiverAvatar: receiver.avatar,
+          giftId: result.gift.id,
+          giftName: result.gift.name,
+          giftImage: result.gift.imageUrl,
+          giftPrice: result.gift.price,
+          quantity: result.giftSend.quantity,
+          totalValue: result.giftSend.totalPrice,
+          isGlobal: true,
+          createdAt: new Date().toISOString(),
+        });
+        
+        this.logger.log(`🌟✅ Legendary gift broadcast complete`);
+      }
     }
     
     this.logger.log(`🎁✅ Gift broadcast complete for room ${dto.roomId}`);
